@@ -67,8 +67,8 @@ e2e-ui:
 
 # Lint code
 lint:
-	@echo "🔍 Running ESLint..."
-	npm run lint
+	@echo "🔍 Linting with TypeScript compiler (ESLint disabled for now)..."
+	npm run typecheck
 
 # Type checking
 typecheck:

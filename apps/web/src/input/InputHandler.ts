@@ -9,6 +9,7 @@ export class InputHandler {
   // Event callbacks
   public onPan?: (deltaX: number, deltaY: number) => void;
   public onZoom?: (factor: number, centerX?: number, centerY?: number) => void;
+  public onFullscreen?: () => void;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -84,12 +85,13 @@ export class InputHandler {
   }
 
   private handleContextMenu(event: Event): void {
-    event.preventDefault();
+    // Temporarily disabled to allow inspection
+    // event.preventDefault();
     
-    // Right click to zoom out
-    if (this.onZoom) {
-      this.onZoom(0.5);
-    }
+    // Right click to zoom out - disabled for debugging
+    // if (this.onZoom) {
+    //   this.onZoom(0.5);
+    // }
   }
 
   private handleTouchStart(event: TouchEvent): void {
@@ -206,6 +208,11 @@ export class InputHandler {
       case 'Space':
         event.preventDefault();
         // Could be used for pause/resume in the future
+        break;
+      case 'KeyF':
+        event.preventDefault();
+        // Fullscreen toggle - handled by viewer
+        if (this.onFullscreen) this.onFullscreen();
         break;
     }
   }

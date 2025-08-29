@@ -8,6 +8,7 @@ export class Controls {
   public onLoadBookmark?: (index: number) => void;
   public onZoomIn?: () => void;
   public onZoomOut?: () => void;
+  public onFullscreenToggle?: () => void;
 
   init(): void {
     this.element = document.createElement('div');
@@ -17,6 +18,7 @@ export class Controls {
       <button id="reset-btn">Reset View</button>
       <button id="zoom-in-btn">Zoom In (+)</button>
       <button id="zoom-out-btn">Zoom Out (-)</button>
+      <button id="fullscreen-btn">Fullscreen (F)</button>
       
       <div class="palette-selector">
         <label>Color Scheme:</label>
@@ -65,6 +67,12 @@ export class Controls {
     
     zoomOutBtn?.addEventListener('click', () => {
       if (this.onZoomOut) this.onZoomOut();
+    });
+
+    // Fullscreen button
+    const fullscreenBtn = this.element.querySelector('#fullscreen-btn') as HTMLButtonElement;
+    fullscreenBtn?.addEventListener('click', () => {
+      if (this.onFullscreenToggle) this.onFullscreenToggle();
     });
 
     // Color scheme selector

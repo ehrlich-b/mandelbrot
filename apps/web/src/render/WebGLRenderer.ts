@@ -150,18 +150,15 @@ export class WebGLRenderer {
     const startTime = performance.now();
     const gl = this.gl;
 
-    // Resize if needed
-    if (this.canvas!.width !== params.width || this.canvas!.height !== params.height) {
-      this.canvas!.width = params.width;
-      this.canvas!.height = params.height;
-      gl.viewport(0, 0, params.width, params.height);
-    }
+    // Update viewport to match current canvas size
+    // Don't resize the canvas here - let MandelbrotViewer handle that
+    gl.viewport(0, 0, this.canvas!.width, this.canvas!.height);
 
     gl.useProgram(this.program);
 
     // Set uniforms
     if (this.uniforms.u_resolution) {
-      gl.uniform2f(this.uniforms.u_resolution, params.width, params.height);
+      gl.uniform2f(this.uniforms.u_resolution, this.canvas!.width, this.canvas!.height);
     }
     if (this.uniforms.u_center) {
       gl.uniform2f(this.uniforms.u_center, params.centerX, params.centerY);

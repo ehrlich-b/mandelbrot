@@ -65,6 +65,14 @@ export class MandelbrotViewer {
     store.subscribe((viewport) => {
       this.viewport = viewport;
     });
+
+    // Handle fullscreen changes
+    document.addEventListener('fullscreenchange', () => {
+      // Add a small delay to ensure the fullscreen transition is complete
+      setTimeout(() => {
+        this.resize();
+      }, 100);
+    });
   }
 
   private setupEventHandlers(): void {
@@ -79,6 +87,10 @@ export class MandelbrotViewer {
 
     this.inputHandler.onZoom = (factor, centerX, centerY) => {
       this.zoom(factor, centerX, centerY);
+    };
+
+    this.inputHandler.onFullscreen = () => {
+      this.toggleFullscreen();
     };
 
     this.controls.onReset = () => {
@@ -108,6 +120,10 @@ export class MandelbrotViewer {
 
     this.controls.onZoomOut = () => {
       this.zoom(0.5);
+    };
+
+    this.controls.onFullscreenToggle = () => {
+      this.toggleFullscreen();
     };
   }
 
@@ -146,14 +162,28 @@ export class MandelbrotViewer {
   }
 
   resize(): void {
-    this.canvas.width = window.innerWidth;
-    this.canvas.height = window.innerHeight;
-    this.canvas.style.width = window.innerWidth + 'px';
-    this.canvas.style.height = window.innerHeight + 'px';
+    let width, height;
+    
+    if (document.fullscreenElement) {
+      // In fullscreen, get the actual available dimensions
+      width = document.documentElement.clientWidth;
+      height = document.documentElement.clientHeight;
+      
+    } else {
+      width = window.innerWidth;
+      height = window.innerHeight;
+    }
+    
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.canvas.style.width = width + 'px';
+    this.canvas.style.height = height + 'px';
+    
+    // The renderer will handle viewport updates in its render method
     
     store.setViewport({
-      width: window.innerWidth,
-      height: window.innerHeight,
+      width: width,
+      height: height,
     });
   }
 
@@ -249,6 +279,23 @@ export class MandelbrotViewer {
 
   setViewport(viewport: Partial<ViewportState>): void {
     store.setViewport(viewport);
+  }
+
+  private toggleFullscreen(): void {
+    if (!document.fullscreenElement) {
+      // Enter fullscreen - request it on the root element that contains the canvas
+      const root = document.getElementById('root');
+      if (root) {
+        root.requestFullscreen().catch(err => {
+          console.warn('Could not enter fullscreen:', err);
+        });
+      }
+    } else {
+      // Exit fullscreen
+      document.exitFullscreen().catch(err => {
+        console.warn('Could not exit fullscreen:', err);
+      });
+    }
   }
 
   dispose(): void {
