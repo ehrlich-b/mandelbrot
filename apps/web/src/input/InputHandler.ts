@@ -73,8 +73,10 @@ export class InputHandler {
     const centerY = event.clientY;
     
     // Determine zoom direction and factor
+    // deltaY > 0 = scroll down/away = zoom OUT (larger scale)
+    // deltaY < 0 = scroll up/toward = zoom IN (smaller scale)
     const delta = event.deltaY;
-    const zoomFactor = delta > 0 ? 1.2 : 1 / 1.2;
+    const zoomFactor = delta > 0 ? 1 / 1.2 : 1.2;
     
     if (this.onZoom) {
       this.onZoom(zoomFactor, centerX, centerY);

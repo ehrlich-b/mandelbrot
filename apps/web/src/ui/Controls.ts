@@ -5,6 +5,9 @@ export class Controls {
   public onReset?: () => void;
   public onColorSchemeChange?: (scheme: number) => void;
   public onIterationChange?: (iterations: number) => void;
+  public onLoadBookmark?: (index: number) => void;
+  public onZoomIn?: () => void;
+  public onZoomOut?: () => void;
 
   init(): void {
     this.element = document.createElement('div');
@@ -33,9 +36,11 @@ export class Controls {
       </div>
       
       <div class="presets">
-        <button id="preset-home">Home</button>
-        <button id="preset-seahorse">Seahorse Valley</button>
-        <button id="preset-spiral">Spiral</button>
+        <label>Presets:</label>
+        <button data-bookmark="0">Home</button>
+        <button data-bookmark="1">Seahorse Valley</button>
+        <button data-bookmark="2">Spiral Detail</button>
+        <button data-bookmark="3">Lightning</button>
       </div>
     `;
     
@@ -48,6 +53,18 @@ export class Controls {
     const resetBtn = this.element.querySelector('#reset-btn') as HTMLButtonElement;
     resetBtn?.addEventListener('click', () => {
       if (this.onReset) this.onReset();
+    });
+
+    // Zoom buttons
+    const zoomInBtn = this.element.querySelector('#zoom-in-btn') as HTMLButtonElement;
+    const zoomOutBtn = this.element.querySelector('#zoom-out-btn') as HTMLButtonElement;
+    
+    zoomInBtn?.addEventListener('click', () => {
+      if (this.onZoomIn) this.onZoomIn();
+    });
+    
+    zoomOutBtn?.addEventListener('click', () => {
+      if (this.onZoomOut) this.onZoomOut();
     });
 
     // Color scheme selector
@@ -67,13 +84,14 @@ export class Controls {
       if (this.onIterationChange) this.onIterationChange(iterations);
     });
 
-    // Preset buttons would need the viewer instance to set specific coordinates
-    // For now, just add placeholders
+    // Preset bookmark buttons
     const presetButtons = this.element.querySelectorAll('.presets button');
     presetButtons.forEach(button => {
       button.addEventListener('click', () => {
-        console.log(`Preset: ${button.id}`);
-        // TODO: Implement preset coordinates
+        const bookmarkIndex = parseInt(button.getAttribute('data-bookmark') || '0');
+        if (this.onLoadBookmark) {
+          this.onLoadBookmark(bookmarkIndex);
+        }
       });
     });
   }

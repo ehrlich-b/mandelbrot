@@ -5,6 +5,7 @@ export interface HUDData {
   maxIterations: number;
   fps: number;
   renderTime: number;
+  qualityLevel?: number;
 }
 
 export class HUD {
@@ -22,6 +23,10 @@ export class HUD {
     const zoomLevel = Math.log2(2.5 / data.scale);
     const magnification = Math.pow(2, Math.max(0, zoomLevel));
 
+    const qualityText = data.qualityLevel !== undefined && data.qualityLevel < 1.0 
+      ? `<div>Quality: ${Math.round(data.qualityLevel * 100)}%</div>`
+      : '';
+
     this.element.innerHTML = `
       <div>Center: ${data.centerX.toExponential(6)}, ${data.centerY.toExponential(6)}</div>
       <div>Scale: ${data.scale.toExponential(3)}</div>
@@ -29,6 +34,7 @@ export class HUD {
       <div>Iterations: ${data.maxIterations}</div>
       <div>FPS: ${Math.round(data.fps)}</div>
       <div>Render: ${data.renderTime.toFixed(1)}ms</div>
+      ${qualityText}
     `;
   }
 

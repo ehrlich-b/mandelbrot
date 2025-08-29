@@ -27,6 +27,11 @@ export class MandelbrotViewer {
 
   private isRunning = false;
   private animationId: number | null = null;
+  private frameBudget = 16; // Target 16ms per frame for 60fps
+  private adaptiveQuality = true;
+  private frameStartTime = 0;
+  private consecutiveSlowFrames = 0;
+  private qualityLevel = 1.0; // 1.0 = full quality, 0.5 = half quality, etc.
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -91,6 +96,18 @@ export class MandelbrotViewer {
 
     this.controls.onIterationChange = (iterations) => {
       store.setViewport({ maxIterations: iterations });
+    };
+
+    this.controls.onLoadBookmark = (index) => {
+      store.loadBookmark(index);
+    };
+
+    this.controls.onZoomIn = () => {
+      this.zoom(2.0);
+    };
+
+    this.controls.onZoomOut = () => {
+      this.zoom(0.5);
     };
   }
 
@@ -159,16 +176,41 @@ export class MandelbrotViewer {
     if (!this.isRunning) return;
 
     const now = performance.now();
+    this.frameStartTime = now;
+    
+    // Calculate FPS from previous frame
     if (this.stats.lastFrameTime > 0) {
-      this.stats.fps = 1000 / (now - this.stats.lastFrameTime);
+      const frameTime = now - this.stats.lastFrameTime;
+      this.stats.fps = 1000 / frameTime;
+      
+      // Adaptive quality: degrade if frames are consistently slow
+      if (this.adaptiveQuality) {
+        if (frameTime > this.frameBudget * 1.5) { // 50% over budget
+          this.consecutiveSlowFrames++;
+          if (this.consecutiveSlowFrames > 3) {
+            this.qualityLevel = Math.max(0.25, this.qualityLevel * 0.9);
+          }
+        } else {
+          this.consecutiveSlowFrames = 0;
+          // Gradually restore quality when performance is good
+          if (frameTime < this.frameBudget * 0.8) { // 20% under budget
+            this.qualityLevel = Math.min(1.0, this.qualityLevel * 1.02);
+          }
+        }
+      }
     }
     this.stats.lastFrameTime = now;
 
+    // Calculate quality-adjusted iterations
+    const effectiveIterations = Math.floor(this.viewport.maxIterations * this.qualityLevel);
+
+    const renderStart = performance.now();
+    
     this.renderer.render({
       centerX: this.viewport.centerX,
       centerY: this.viewport.centerY,
       scale: this.viewport.scale,
-      maxIterations: this.viewport.maxIterations,
+      maxIterations: Math.max(64, effectiveIterations), // Minimum 64 iterations
       width: this.canvas.width,
       height: this.canvas.height,
       colorScheme: this.viewport.colorScheme,
@@ -176,16 +218,29 @@ export class MandelbrotViewer {
       colorScale: this.viewport.colorScale,
     });
 
+    this.stats.renderTime = performance.now() - renderStart;
+
     this.hud.update({
       centerX: this.viewport.centerX,
       centerY: this.viewport.centerY,
       scale: this.viewport.scale,
-      maxIterations: this.viewport.maxIterations,
+      maxIterations: effectiveIterations,
       fps: this.stats.fps,
       renderTime: this.stats.renderTime,
+      qualityLevel: this.qualityLevel,
     });
 
-    this.animationId = requestAnimationFrame(this.renderLoop);
+    // Schedule next frame with time budgeting consideration
+    const frameTime = performance.now() - this.frameStartTime;
+    if (frameTime < this.frameBudget * 0.8) {
+      // Frame finished early, schedule immediately
+      this.animationId = requestAnimationFrame(this.renderLoop);
+    } else {
+      // Frame took longer, add small delay to prevent overwhelming
+      setTimeout(() => {
+        this.animationId = requestAnimationFrame(this.renderLoop);
+      }, 1);
+    }
   };
 
   getViewport(): ViewportState {

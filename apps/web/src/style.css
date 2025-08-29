@@ -72,6 +72,23 @@ html, body {
   background: #777;
 }
 
+.presets {
+  margin-top: 15px;
+}
+
+.presets label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.presets button {
+  margin: 2px 0;
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
 .palette-selector {
   margin-top: 10px;
 }

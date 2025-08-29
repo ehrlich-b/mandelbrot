@@ -249,3 +249,10 @@ A feature is complete when:
 6. ✅ Memory usage is bounded
 7. ✅ Accessibility features work
 8. ✅ Documentation updated
+
+## Claude Code Instructions
+
+### Critical Rules
+1. **NEVER commit changes** - Only stage files when explicitly asked to commit
+2. **When asked to "reanchor"** - Always re-read ALL anchor documents (CLAUDE.md, TODO.md, package.json, etc.) even if you think you remember them
+3. **Anchor documents** - Collectively refers to: CLAUDE.md, TODO.md, package.json, README.md, and any other project configuration files

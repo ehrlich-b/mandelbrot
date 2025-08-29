@@ -104,4 +104,30 @@ test.describe('Basic Mandelbrot Viewer', () => {
     // Should maintain decent FPS
     expect(fps).toBeGreaterThan(30);
   });
+
+  test('should render Mandelbrot set visually', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto('/');
+    
+    // Wait for WebGL initialization and first render
+    await page.waitForTimeout(2000);
+    
+    // Take screenshot of the full page
+    await expect(page).toHaveScreenshot('mandelbrot-home-view.png');
+    
+    // Test zoom in
+    await page.click('#zoom-in-btn');
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot('mandelbrot-zoom-in.png');
+    
+    // Test different color scheme
+    await page.selectOption('#color-scheme', '1'); // Sunset
+    await page.waitForTimeout(500);
+    await expect(page).toHaveScreenshot('mandelbrot-sunset-colors.png');
+    
+    // Test preset locations
+    await page.click('[data-bookmark="1"]'); // Seahorse Valley
+    await page.waitForTimeout(1000);
+    await expect(page).toHaveScreenshot('mandelbrot-seahorse-valley.png');
+  });
 });
