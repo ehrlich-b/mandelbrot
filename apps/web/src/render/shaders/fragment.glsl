@@ -40,13 +40,14 @@ float histogramEqualize(float mu) {
         return mu;
     }
     
-    // Approximation using power curve to simulate equalization
-    // This creates a more even distribution across the palette
-    float normalized = mu / float(u_maxIterations);
-    float equalized = pow(normalized, 0.5); // Square root for more uniform distribution
+    // Simple smooth histogram equalization without hard cutoffs
+    float normalized = clamp(mu / float(u_maxIterations), 0.0, 1.0);
     
-    // Apply some contrast enhancement
-    equalized = smoothstep(0.0, 1.0, equalized * 1.2 - 0.1);
+    // Apply square root transformation for better distribution
+    float equalized = pow(normalized, 0.6); // Slightly less aggressive than 0.5
+    
+    // Add subtle S-curve for contrast without sharp edges
+    equalized = equalized * equalized * (3.0 - 2.0 * equalized);
     
     return equalized * float(u_maxIterations);
 }
@@ -58,138 +59,149 @@ vec3 getColor(float mu, int scheme) {
     mu = mu * u_colorScale + u_colorOffset;
     
     if (scheme == 0) {
-        // Classic rainbow
-        float hue = mod(mu * 0.05, 1.0);
+        // Classic rainbow - continuous smooth gradient
+        float phase1 = mu * 0.05;
+        float phase2 = mu * 0.1;
+        float hue = 0.5 + 0.5 * sin(phase1);
         float sat = 0.7;
-        float val = 1.0 - pow(1.0 - mod(mu * 0.1, 1.0), 3.0);
+        float val = 1.0 - pow(1.0 - (0.5 + 0.5 * sin(phase2)), 3.0);
         return hsv2rgb(vec3(hue, sat, val));
     } else if (scheme == 1) {
-        // Sunset
-        float t = mod(mu * 0.03, 1.0);
-        vec3 sunset1 = vec3(1.0, 0.5, 0.0);
-        vec3 sunset2 = vec3(1.0, 0.0, 0.5);
-        vec3 sunset3 = vec3(0.2, 0.0, 0.5);
+        // Sunset - continuous smooth gradient using sine waves to eliminate banding
+        float phase = mu * 0.03;
         
-        if (t < 0.5) {
-            return mix(sunset1, sunset2, t * 2.0);
-        } else {
-            return mix(sunset2, sunset3, (t - 0.5) * 2.0);
-        }
+        // Create smooth continuous color transitions using trigonometric functions
+        float r = 0.8 + 0.2 * sin(phase);
+        float g = 0.3 + 0.2 * sin(phase + 1.5);
+        float b = 0.1 + 0.3 * sin(phase + 3.0);
+        
+        // Adjust for sunset palette feel
+        r = clamp(r * (0.9 + 0.1 * cos(phase * 0.5)), 0.0, 1.0);
+        g = clamp(g * (0.4 + 0.3 * cos(phase * 0.7 + 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.2 + 0.2 * cos(phase * 0.9 + 2.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 2) {
-        // Ocean
-        float t = mod(mu * 0.04, 1.0);
-        vec3 ocean1 = vec3(0.0, 0.1, 0.4);
-        vec3 ocean2 = vec3(0.0, 0.5, 0.7);
-        vec3 ocean3 = vec3(0.0, 0.9, 1.0);
+        // Ocean - continuous smooth gradient using sine waves
+        float phase = mu * 0.04;
         
-        if (t < 0.5) {
-            return mix(ocean1, ocean2, t * 2.0);
-        } else {
-            return mix(ocean2, ocean3, (t - 0.5) * 2.0);
-        }
+        // Create smooth ocean color transitions
+        float r = 0.0 + 0.1 * sin(phase + 3.0);
+        float g = 0.4 + 0.4 * sin(phase + 1.0);
+        float b = 0.7 + 0.3 * sin(phase);
+        
+        // Adjust for ocean feel with wave-like variations
+        r = clamp(r * (0.2 + 0.1 * cos(phase * 0.4)), 0.0, 1.0);
+        g = clamp(g * (0.8 + 0.2 * cos(phase * 0.6 + 2.0)), 0.0, 1.0);
+        b = clamp(b * (0.9 + 0.1 * cos(phase * 0.8 + 1.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 3) {
-        // Fire
-        float t = mod(mu * 0.02, 1.0);
-        vec3 fire1 = vec3(0.1, 0.0, 0.0);
-        vec3 fire2 = vec3(1.0, 0.0, 0.0);
-        vec3 fire3 = vec3(1.0, 1.0, 0.0);
-        vec3 fire4 = vec3(1.0, 1.0, 1.0);
+        // Fire - continuous smooth gradient using sine waves
+        float phase = mu * 0.02;
         
-        if (t < 0.33) {
-            return mix(fire1, fire2, t * 3.0);
-        } else if (t < 0.66) {
-            return mix(fire2, fire3, (t - 0.33) * 3.0);
-        } else {
-            return mix(fire3, fire4, (t - 0.66) * 3.0);
-        }
+        // Create smooth fire color transitions
+        float r = 0.6 + 0.4 * sin(phase + 0.5);
+        float g = 0.3 + 0.4 * sin(phase + 2.0);
+        float b = 0.0 + 0.3 * sin(phase + 4.0);
+        
+        // Adjust for fire feel with flickering variations
+        r = clamp(r * (0.9 + 0.1 * cos(phase * 0.8)), 0.0, 1.0);
+        g = clamp(g * (0.7 + 0.3 * cos(phase * 1.2 + 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.4 + 0.2 * cos(phase * 1.5 + 2.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 4) {
-        // Monochrome
-        float intensity = mod(mu * 0.1, 1.0);
+        // Monochrome - continuous smooth gradient
+        float phase = mu * 0.1;
+        float intensity = 0.5 + 0.5 * sin(phase);
         return vec3(intensity);
     } else if (scheme == 5) {
-        // Twilight - Purple to pink gradient
-        float t = mod(mu * 0.025, 1.0);
-        vec3 twilight1 = vec3(0.15, 0.0, 0.4);   // Deep purple
-        vec3 twilight2 = vec3(0.5, 0.1, 0.8);    // Purple
-        vec3 twilight3 = vec3(0.9, 0.3, 0.7);    // Pink
-        vec3 twilight4 = vec3(1.0, 0.8, 0.9);    // Light pink
+        // Twilight - continuous smooth gradient using sine waves
+        float phase = mu * 0.025;
         
-        if (t < 0.33) {
-            return mix(twilight1, twilight2, t * 3.0);
-        } else if (t < 0.66) {
-            return mix(twilight2, twilight3, (t - 0.33) * 3.0);
-        } else {
-            return mix(twilight3, twilight4, (t - 0.66) * 3.0);
-        }
+        // Create smooth twilight color transitions
+        float r = 0.4 + 0.4 * sin(phase + 1.0);
+        float g = 0.1 + 0.2 * sin(phase + 2.5);
+        float b = 0.6 + 0.3 * sin(phase);
+        
+        // Adjust for twilight purple/pink feel
+        r = clamp(r * (0.7 + 0.3 * cos(phase * 0.6)), 0.0, 1.0);
+        g = clamp(g * (0.4 + 0.2 * cos(phase * 0.8 + 1.5)), 0.0, 1.0);
+        b = clamp(b * (0.8 + 0.2 * cos(phase * 0.4 + 0.5)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 6) {
-        // Forest - Natural greens
-        float t = mod(mu * 0.04, 1.0);
-        vec3 forest1 = vec3(0.0, 0.1, 0.0);      // Dark green
-        vec3 forest2 = vec3(0.1, 0.4, 0.1);      // Forest green
-        vec3 forest3 = vec3(0.3, 0.7, 0.2);      // Bright green
-        vec3 forest4 = vec3(0.7, 0.9, 0.3);      // Yellow-green
+        // Forest - continuous smooth gradient using sine waves
+        float phase = mu * 0.04;
         
-        if (t < 0.33) {
-            return mix(forest1, forest2, t * 3.0);
-        } else if (t < 0.66) {
-            return mix(forest2, forest3, (t - 0.33) * 3.0);
-        } else {
-            return mix(forest3, forest4, (t - 0.66) * 3.0);
-        }
+        // Create smooth forest color transitions
+        float r = 0.1 + 0.3 * sin(phase + 2.0);
+        float g = 0.5 + 0.4 * sin(phase);
+        float b = 0.1 + 0.2 * sin(phase + 4.0);
+        
+        // Adjust for forest natural feel
+        r = clamp(r * (0.4 + 0.3 * cos(phase * 0.5 + 1.0)), 0.0, 1.0);
+        g = clamp(g * (0.8 + 0.2 * cos(phase * 0.7)), 0.0, 1.0);
+        b = clamp(b * (0.3 + 0.2 * cos(phase * 0.9 + 2.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 7) {
-        // Neon - Vibrant cyberpunk colors
-        float t = mod(mu * 0.06, 1.0);
-        vec3 neon1 = vec3(0.0, 0.0, 0.2);        // Dark blue
-        vec3 neon2 = vec3(0.0, 1.0, 1.0);        // Cyan
-        vec3 neon3 = vec3(1.0, 0.0, 1.0);        // Magenta
-        vec3 neon4 = vec3(1.0, 1.0, 0.0);        // Yellow
+        // Neon - continuous smooth gradient using sine waves
+        float phase = mu * 0.06;
         
-        if (t < 0.33) {
-            return mix(neon1, neon2, t * 3.0);
-        } else if (t < 0.66) {
-            return mix(neon2, neon3, (t - 0.33) * 3.0);
-        } else {
-            return mix(neon3, neon4, (t - 0.66) * 3.0);
-        }
+        // Create smooth neon color transitions
+        float r = 0.5 + 0.5 * sin(phase + 1.5);
+        float g = 0.5 + 0.5 * sin(phase);
+        float b = 0.5 + 0.5 * sin(phase + 3.0);
+        
+        // Adjust for vibrant neon feel
+        r = clamp(r * (0.8 + 0.2 * cos(phase * 0.8 + 2.0)), 0.0, 1.0);
+        g = clamp(g * (0.9 + 0.1 * cos(phase * 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.7 + 0.3 * cos(phase * 0.6 + 1.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 8) {
-        // Ice - Cool blues and whites
-        float t = mod(mu * 0.035, 1.0);
-        vec3 ice1 = vec3(0.05, 0.05, 0.2);       // Dark blue
-        vec3 ice2 = vec3(0.1, 0.3, 0.6);         // Ice blue
-        vec3 ice3 = vec3(0.4, 0.7, 0.9);         // Light blue
-        vec3 ice4 = vec3(0.9, 0.95, 1.0);        // White
+        // Ice - continuous smooth gradient using sine waves
+        float phase = mu * 0.035;
         
-        if (t < 0.33) {
-            return mix(ice1, ice2, t * 3.0);
-        } else if (t < 0.66) {
-            return mix(ice2, ice3, (t - 0.33) * 3.0);
-        } else {
-            return mix(ice3, ice4, (t - 0.66) * 3.0);
-        }
+        // Create smooth ice color transitions
+        float r = 0.3 + 0.3 * sin(phase + 4.0);
+        float g = 0.4 + 0.4 * sin(phase + 2.0);
+        float b = 0.6 + 0.4 * sin(phase);
+        
+        // Adjust for cool ice feel
+        r = clamp(r * (0.6 + 0.4 * cos(phase * 0.4)), 0.0, 1.0);
+        g = clamp(g * (0.7 + 0.3 * cos(phase * 0.5 + 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.9 + 0.1 * cos(phase * 0.6 + 0.5)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 9) {
-        // Copper - Warm metallic tones
-        float t = mod(mu * 0.028, 1.0);
-        vec3 copper1 = vec3(0.1, 0.05, 0.0);     // Dark brown
-        vec3 copper2 = vec3(0.5, 0.2, 0.1);      // Brown
-        vec3 copper3 = vec3(0.9, 0.4, 0.2);      // Copper
-        vec3 copper4 = vec3(1.0, 0.8, 0.6);      // Light copper
+        // Copper - continuous smooth gradient using sine waves
+        float phase = mu * 0.028;
         
-        if (t < 0.33) {
-            return mix(copper1, copper2, t * 3.0);
-        } else if (t < 0.66) {
-            return mix(copper2, copper3, (t - 0.33) * 3.0);
-        } else {
-            return mix(copper3, copper4, (t - 0.66) * 3.0);
-        }
+        // Create smooth copper color transitions
+        float r = 0.6 + 0.4 * sin(phase);
+        float g = 0.3 + 0.3 * sin(phase + 1.0);
+        float b = 0.1 + 0.2 * sin(phase + 2.0);
+        
+        // Adjust for copper metallic feel
+        r = clamp(r * (0.8 + 0.2 * cos(phase * 0.3)), 0.0, 1.0);
+        g = clamp(g * (0.5 + 0.3 * cos(phase * 0.5 + 1.5)), 0.0, 1.0);
+        b = clamp(b * (0.3 + 0.2 * cos(phase * 0.7 + 3.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
     } else if (scheme == 10) {
-        // Spectrum - Full rainbow with smooth transitions
-        float hue = mod(mu * 0.08, 1.0);
-        float sat = 0.8 + 0.2 * sin(mu * 0.02);
-        float val = 0.7 + 0.3 * cos(mu * 0.03);
+        // Spectrum - continuous smooth rainbow transitions
+        float phase = mu * 0.08;
+        float hue = 0.5 + 0.5 * sin(phase);
+        float sat = 0.8 + 0.2 * sin(phase * 0.25);
+        float val = 0.7 + 0.3 * cos(phase * 0.375);
         return hsv2rgb(vec3(hue, sat, val));
     } else {
-        // Default to classic
-        float hue = mod(mu * 0.1, 1.0);
+        // Default classic - continuous smooth rainbow
+        float phase = mu * 0.1;
+        float hue = 0.5 + 0.5 * sin(phase);
         return hsv2rgb(vec3(hue, 0.8, 0.9));
     }
 }

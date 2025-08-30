@@ -258,3 +258,6 @@ A feature is complete when:
 3. **Anchor documents** - Collectively refers to: CLAUDE.md, TODO.md, package.json, README.md, and any other project configuration files
 4. **ALWAYS update TODO.md when completing tasks** - Mark completed items as ✅ COMPLETED and move to appropriate sections
 5. **NEVER pursue ESLint fixes** - ESLint has been abandoned in favor of TypeScript strict checking only
+6. **NEVER declare victory without testing** - Always verify changes by running tests, checking visual results, or examining actual output before marking tasks complete
+7. **Test-driven approach** - After making changes, immediately run appropriate tests (npm run test:e2e, visual inspection, etc.) and examine results
+8. **Visual verification required** - For UI/rendering changes, always check the actual visual output at localhost:PORT before claiming success

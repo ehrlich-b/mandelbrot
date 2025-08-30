@@ -8,7 +8,6 @@ export interface HUDData {
   qualityLevel?: number;
   progressiveMode?: string;
   progressiveStage?: number;
-  workerStatus?: 'main-thread' | 'worker' | 'worker-fallback';
 }
 
 export class HUD {
@@ -33,11 +32,6 @@ export class HUD {
     const progressiveText = data.progressiveMode && data.progressiveMode !== 'full'
       ? `<div>Mode: ${data.progressiveMode} (${data.progressiveStage || 0})</div>`
       : '';
-    
-    const workerText = data.workerStatus
-      ? `<div>Renderer: ${data.workerStatus === 'worker' ? 'Web Worker' : 
-          data.workerStatus === 'worker-fallback' ? 'Worker (fallback)' : 'Main Thread'}</div>`
-      : '';
 
     this.element.innerHTML = `
       <div>Center: ${data.centerX.toExponential(6)}, ${data.centerY.toExponential(6)}</div>
@@ -48,7 +42,6 @@ export class HUD {
       <div>Render: ${data.renderTime.toFixed(1)}ms</div>
       ${qualityText}
       ${progressiveText}
-      ${workerText}
     `;
   }
 

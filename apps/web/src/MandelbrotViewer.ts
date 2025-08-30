@@ -1,5 +1,4 @@
-import { ProgressiveMode, type ProgressiveRenderParams } from './render/WebGLRenderer';
-import { HybridRenderer } from './render/HybridRenderer';
+import { WebGLRenderer, ProgressiveMode, type ProgressiveRenderParams } from './render/WebGLRenderer';
 import { InputHandler } from './input/InputHandler';
 import { HUD } from './ui/HUD';
 import { Controls } from './ui/Controls';
@@ -13,7 +12,7 @@ export interface RenderStats {
 
 export class MandelbrotViewer {
   private canvas: HTMLCanvasElement;
-  private renderer: HybridRenderer;
+  private renderer: WebGLRenderer;
   private inputHandler: InputHandler;
   private hud: HUD;
   private controls: Controls;
@@ -50,11 +49,7 @@ export class MandelbrotViewer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.renderer = new HybridRenderer({
-      preferWorker: true,
-      fallbackToMainThread: true,
-      workerTimeout: 5000,
-    });
+    this.renderer = new WebGLRenderer();
     this.inputHandler = new InputHandler(canvas);
     this.hud = new HUD();
     this.controls = new Controls();
@@ -261,7 +256,7 @@ export class MandelbrotViewer {
     }
   }
 
-  private renderLoop = async (): Promise<void> => {
+  private renderLoop = (): void => {
     if (!this.isRunning) return;
 
     const now = performance.now();
@@ -327,7 +322,7 @@ export class MandelbrotViewer {
         histogramEqualization: this.histogramEqualizationEnabled
       };
       
-      await this.renderer.renderProgressive(progressiveParams);
+      this.renderer.renderProgressive(progressiveParams);
       
       // Advance to next progressive stage, but only for first few frames
       if (this.progressiveStage < this.maxProgressiveStages) {
@@ -341,7 +336,7 @@ export class MandelbrotViewer {
       }
     } else {
       // Use traditional full rendering
-      await this.renderer.render({
+      this.renderer.render({
         centerX: this.viewport.centerX,
         centerY: this.viewport.centerY,
         scale: this.viewport.scale,
@@ -369,7 +364,6 @@ export class MandelbrotViewer {
       qualityLevel: this.qualityLevel,
       progressiveMode: this.progressiveMode,
       progressiveStage: this.progressiveStage,
-      workerStatus: this.renderer.isUsingWorker ? 'worker' : 'main-thread',
     });
 
     // Schedule next frame with time budgeting consideration
