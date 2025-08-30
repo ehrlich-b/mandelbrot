@@ -17,6 +17,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    plugins: () => [glsl()],
   },
   server: {
     port: 3000,

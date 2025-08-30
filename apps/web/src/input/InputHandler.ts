@@ -3,8 +3,12 @@ export class InputHandler {
   private isMouseDown = false;
   private lastMouseX = 0;
   private lastMouseY = 0;
-  private touches: Map<number, { x: number; y: number }> = new Map();
+  private touches: Map<number, { x: number; y: number; timestamp: number }> = new Map();
   private lastTouchDistance = 0;
+  private lastTapTime = 0;
+  private lastTapPosition: { x: number; y: number } | null = null;
+  private doubleTapThreshold = 300; // ms
+  private tapThreshold = 10; // pixels
   
   // Event callbacks
   public onPan?: (deltaX: number, deltaY: number) => void;
@@ -84,7 +88,7 @@ export class InputHandler {
     }
   }
 
-  private handleContextMenu(event: Event): void {
+  private handleContextMenu(_event: Event): void {
     // Temporarily disabled to allow inspection
     // event.preventDefault();
     
@@ -98,9 +102,10 @@ export class InputHandler {
     event.preventDefault();
     
     this.touches.clear();
+    const now = performance.now();
     for (let i = 0; i < event.touches.length; i++) {
       const touch = event.touches[i];
-      this.touches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+      this.touches.set(touch.identifier, { x: touch.clientX, y: touch.clientY, timestamp: now });
     }
     
     if (event.touches.length === 2) {
@@ -127,7 +132,7 @@ export class InputHandler {
           this.onPan(deltaX, deltaY);
         }
         
-        this.touches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+        this.touches.set(touch.identifier, { x: touch.clientX, y: touch.clientY, timestamp: performance.now() });
       }
     } else if (event.touches.length === 2) {
       // Two finger pinch/zoom
@@ -150,13 +155,59 @@ export class InputHandler {
       this.lastTouchDistance = currentDistance;
       
       // Update touch positions
-      this.touches.set(touch1.identifier, { x: touch1.clientX, y: touch1.clientY });
-      this.touches.set(touch2.identifier, { x: touch2.clientX, y: touch2.clientY });
+      const now = performance.now();
+      this.touches.set(touch1.identifier, { x: touch1.clientX, y: touch1.clientY, timestamp: now });
+      this.touches.set(touch2.identifier, { x: touch2.clientX, y: touch2.clientY, timestamp: now });
     }
   }
 
   private handleTouchEnd(event: TouchEvent): void {
     event.preventDefault();
+    
+    const now = performance.now();
+    
+    // Handle double-tap to zoom
+    if (event.touches.length === 0 && event.changedTouches.length === 1) {
+      const touch = event.changedTouches[0];
+      const touchData = this.touches.get(touch.identifier);
+      
+      if (touchData) {
+        const touchDuration = now - touchData.timestamp;
+        const touchDistance = Math.sqrt(
+          Math.pow(touch.clientX - touchData.x, 2) + 
+          Math.pow(touch.clientY - touchData.y, 2)
+        );
+        
+        // Check if this is a tap (short duration, small movement)
+        if (touchDuration < 200 && touchDistance < this.tapThreshold) {
+          const timeSinceLastTap = now - this.lastTapTime;
+          
+          if (this.lastTapPosition && 
+              timeSinceLastTap < this.doubleTapThreshold) {
+            // Check if taps are close together
+            const tapDistance = Math.sqrt(
+              Math.pow(touch.clientX - this.lastTapPosition.x, 2) + 
+              Math.pow(touch.clientY - this.lastTapPosition.y, 2)
+            );
+            
+            if (tapDistance < 50) { // Taps are close enough
+              // Double tap detected - zoom in
+              if (this.onZoom) {
+                this.onZoom(0.5, touch.clientX, touch.clientY); // 2x zoom in
+              }
+              // Reset to prevent triple-tap
+              this.lastTapTime = 0;
+              this.lastTapPosition = null;
+              return;
+            }
+          }
+          
+          // Record this tap for potential double-tap
+          this.lastTapTime = now;
+          this.lastTapPosition = { x: touch.clientX, y: touch.clientY };
+        }
+      }
+    }
     
     // Remove ended touches
     const activeTouchIds = new Set();
@@ -211,8 +262,14 @@ export class InputHandler {
         break;
       case 'KeyF':
         event.preventDefault();
-        // Fullscreen toggle - handled by viewer
         if (this.onFullscreen) this.onFullscreen();
+        break;
+      case 'Escape':
+        event.preventDefault();
+        // Exit fullscreen if currently in fullscreen mode
+        if (document.fullscreenElement && this.onFullscreen) {
+          this.onFullscreen();
+        }
         break;
     }
   }

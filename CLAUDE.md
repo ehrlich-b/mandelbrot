@@ -256,3 +256,5 @@ A feature is complete when:
 1. **NEVER commit changes** - Only stage files when explicitly asked to commit
 2. **When asked to "reanchor"** - Always re-read ALL anchor documents (CLAUDE.md, TODO.md, package.json, etc.) even if you think you remember them
 3. **Anchor documents** - Collectively refers to: CLAUDE.md, TODO.md, package.json, README.md, and any other project configuration files
+4. **ALWAYS update TODO.md when completing tasks** - Mark completed items as ✅ COMPLETED and move to appropriate sections
+5. **NEVER pursue ESLint fixes** - ESLint has been abandoned in favor of TypeScript strict checking only

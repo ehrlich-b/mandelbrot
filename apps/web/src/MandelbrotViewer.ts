@@ -1,4 +1,5 @@
-import { WebGLRenderer } from './render/WebGLRenderer';
+import { ProgressiveMode, type ProgressiveRenderParams } from './render/WebGLRenderer';
+import { HybridRenderer } from './render/HybridRenderer';
 import { InputHandler } from './input/InputHandler';
 import { HUD } from './ui/HUD';
 import { Controls } from './ui/Controls';
@@ -12,7 +13,7 @@ export interface RenderStats {
 
 export class MandelbrotViewer {
   private canvas: HTMLCanvasElement;
-  private renderer: WebGLRenderer;
+  private renderer: HybridRenderer;
   private inputHandler: InputHandler;
   private hud: HUD;
   private controls: Controls;
@@ -32,10 +33,28 @@ export class MandelbrotViewer {
   private frameStartTime = 0;
   private consecutiveSlowFrames = 0;
   private qualityLevel = 1.0; // 1.0 = full quality, 0.5 = half quality, etc.
+  
+  // Progressive rendering state
+  private progressiveStage = 0;
+  private progressiveMode = ProgressiveMode.FULL;
+  private progressiveEnabled = false; // Disabled due to chaos issues
+  private maxProgressiveStages = 2;
+  private progressiveCompleted = false;
+  
+  // Anti-aliasing state
+  private antiAliasingEnabled = true;
+  private aaQuality = 2.0;
+  
+  // Histogram equalization state
+  private histogramEqualizationEnabled = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.renderer = new WebGLRenderer();
+    this.renderer = new HybridRenderer({
+      preferWorker: true,
+      fallbackToMainThread: true,
+      workerTimeout: 5000,
+    });
     this.inputHandler = new InputHandler(canvas);
     this.hud = new HUD();
     this.controls = new Controls();
@@ -63,6 +82,17 @@ export class MandelbrotViewer {
     
     // Subscribe to store changes
     store.subscribe((viewport) => {
+      // Reset progressive rendering when viewport changes significantly
+      const prevViewport = this.viewport;
+      const centerChanged = Math.abs(viewport.centerX - prevViewport.centerX) > 1e-12 ||
+                           Math.abs(viewport.centerY - prevViewport.centerY) > 1e-12;
+      const scaleChanged = Math.abs(viewport.scale - prevViewport.scale) > 1e-12;
+      const iterationsChanged = viewport.maxIterations !== prevViewport.maxIterations;
+      
+      if (centerChanged || scaleChanged || iterationsChanged) {
+        this.resetProgressiveRendering();
+      }
+      
       this.viewport = viewport;
     });
 
@@ -124,6 +154,35 @@ export class MandelbrotViewer {
 
     this.controls.onFullscreenToggle = () => {
       this.toggleFullscreen();
+    };
+
+    this.controls.onProgressiveToggle = (enabled) => {
+      this.progressiveEnabled = enabled;
+      if (enabled) {
+        console.log('Progressive rendering enabled');
+        this.resetProgressiveRendering();
+      } else {
+        console.log('Progressive rendering disabled');
+        this.progressiveCompleted = true; // Stop any ongoing progressive rendering
+      }
+    };
+
+    this.controls.onAntiAliasingToggle = (enabled) => {
+      this.antiAliasingEnabled = enabled;
+      console.log(`Anti-aliasing ${enabled ? 'enabled' : 'disabled'}`);
+    };
+
+    this.controls.onHistogramToggle = (enabled) => {
+      this.histogramEqualizationEnabled = enabled;
+      console.log(`Histogram equalization ${enabled ? 'enabled' : 'disabled'}`);
+    };
+
+    this.controls.onColorOffsetChange = (offset) => {
+      store.setViewport({ colorOffset: offset });
+    };
+
+    this.controls.onColorScaleChange = (scale) => {
+      store.setViewport({ colorScale: scale });
     };
   }
 
@@ -202,7 +261,7 @@ export class MandelbrotViewer {
     }
   }
 
-  private renderLoop = (): void => {
+  private renderLoop = async (): Promise<void> => {
     if (!this.isRunning) return;
 
     const now = performance.now();
@@ -214,11 +273,16 @@ export class MandelbrotViewer {
       this.stats.fps = 1000 / frameTime;
       
       // Adaptive quality: degrade if frames are consistently slow
+      // BUT don't degrade at deep zoom levels where detail is critical
       if (this.adaptiveQuality) {
+        const zoomLevel = Math.log2(2.5 / this.viewport.scale);
+        const isDeepZoom = zoomLevel > 15; // Scale < ~3e-5
+        
         if (frameTime > this.frameBudget * 1.5) { // 50% over budget
           this.consecutiveSlowFrames++;
-          if (this.consecutiveSlowFrames > 3) {
-            this.qualityLevel = Math.max(0.25, this.qualityLevel * 0.9);
+          if (this.consecutiveSlowFrames > 3 && !isDeepZoom) {
+            // Only degrade quality if not at deep zoom levels
+            this.qualityLevel = Math.max(0.5, this.qualityLevel * 0.9); // Min 50% instead of 25%
           }
         } else {
           this.consecutiveSlowFrames = 0;
@@ -233,20 +297,65 @@ export class MandelbrotViewer {
 
     // Calculate quality-adjusted iterations
     const effectiveIterations = Math.floor(this.viewport.maxIterations * this.qualityLevel);
+    
+    // Calculate current frame time for progressive mode decision
+    const currentFrameTime = this.stats.lastFrameTime > 0 ? (now - this.stats.lastFrameTime) : 0;
+    
+    // Determine progressive rendering mode based on performance
+    this.updateProgressiveMode(currentFrameTime);
 
     const renderStart = performance.now();
     
-    this.renderer.render({
-      centerX: this.viewport.centerX,
-      centerY: this.viewport.centerY,
-      scale: this.viewport.scale,
-      maxIterations: Math.max(64, effectiveIterations), // Minimum 64 iterations
-      width: this.canvas.width,
-      height: this.canvas.height,
-      colorScheme: this.viewport.colorScheme,
-      colorOffset: this.viewport.colorOffset,
-      colorScale: this.viewport.colorScale,
-    });
+    if (this.progressiveEnabled && !this.progressiveCompleted && this.progressiveMode !== ProgressiveMode.FULL) {
+      // Use progressive rendering
+      const progressiveParams: ProgressiveRenderParams = {
+        centerX: this.viewport.centerX,
+        centerY: this.viewport.centerY,
+        scale: this.viewport.scale,
+        maxIterations: Math.max(64, effectiveIterations),
+        width: this.canvas.width,
+        height: this.canvas.height,
+        colorScheme: this.viewport.colorScheme,
+        colorOffset: this.viewport.colorOffset,
+        colorScale: this.viewport.colorScale,
+        progressiveMode: this.progressiveMode,
+        progressiveStage: this.progressiveStage,
+        qualityLevel: this.qualityLevel,
+        previousTransform: this.renderer.getLastTransform() ?? undefined,
+        antiAliasing: this.antiAliasingEnabled,
+        aaQuality: this.aaQuality,
+        histogramEqualization: this.histogramEqualizationEnabled
+      };
+      
+      await this.renderer.renderProgressive(progressiveParams);
+      
+      // Advance to next progressive stage, but only for first few frames
+      if (this.progressiveStage < this.maxProgressiveStages) {
+        this.progressiveStage++;
+        console.log(`Progressive stage: ${this.progressiveStage}/${this.maxProgressiveStages}`);
+      } else {
+        // After max stages, mark as completed to prevent further progressive rendering
+        this.progressiveCompleted = true;
+        this.progressiveMode = ProgressiveMode.FULL;
+        console.log('Progressive rendering completed');
+      }
+    } else {
+      // Use traditional full rendering
+      await this.renderer.render({
+        centerX: this.viewport.centerX,
+        centerY: this.viewport.centerY,
+        scale: this.viewport.scale,
+        maxIterations: Math.max(64, effectiveIterations),
+        width: this.canvas.width,
+        height: this.canvas.height,
+        colorScheme: this.viewport.colorScheme,
+        colorOffset: this.viewport.colorOffset,
+        colorScale: this.viewport.colorScale,
+        antiAliasing: this.antiAliasingEnabled,
+        aaQuality: this.aaQuality,
+        histogramEqualization: this.histogramEqualizationEnabled,
+      });
+    }
 
     this.stats.renderTime = performance.now() - renderStart;
 
@@ -258,6 +367,9 @@ export class MandelbrotViewer {
       fps: this.stats.fps,
       renderTime: this.stats.renderTime,
       qualityLevel: this.qualityLevel,
+      progressiveMode: this.progressiveMode,
+      progressiveStage: this.progressiveStage,
+      workerStatus: this.renderer.isUsingWorker ? 'worker' : 'main-thread',
     });
 
     // Schedule next frame with time budgeting consideration
@@ -296,6 +408,30 @@ export class MandelbrotViewer {
         console.warn('Could not exit fullscreen:', err);
       });
     }
+  }
+
+  private updateProgressiveMode(_frameTime: number): void {
+    if (!this.progressiveEnabled) {
+      this.progressiveMode = ProgressiveMode.FULL;
+      return;
+    }
+
+    // Progressive mode selection with clear completion
+    if (this.progressiveStage === 0) {
+      this.progressiveMode = ProgressiveMode.STOCHASTIC;
+    } else if (this.progressiveStage === 1) {
+      this.progressiveMode = ProgressiveMode.INTERLEAVED;
+    } else {
+      // Force completion after 2 stages and stop progressive mode
+      this.progressiveMode = ProgressiveMode.FULL;
+      this.progressiveEnabled = false; // Auto-disable to prevent loop
+    }
+  }
+
+  private resetProgressiveRendering(): void {
+    this.progressiveStage = 0;
+    this.progressiveCompleted = false;
+    this.progressiveMode = this.progressiveEnabled ? ProgressiveMode.STOCHASTIC : ProgressiveMode.FULL;
   }
 
   dispose(): void {

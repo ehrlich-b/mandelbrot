@@ -11,6 +11,28 @@ export interface RenderParams {
   colorScheme: number;
   colorOffset: number;
   colorScale: number;
+  antiAliasing?: boolean;
+  aaQuality?: number;
+  histogramEqualization?: boolean;
+}
+
+export enum ProgressiveMode {
+  FULL = 'full',
+  REPROJECTION = 'reprojection',
+  STOCHASTIC = 'stochastic',
+  INTERLEAVED = 'interleaved',
+  ADAPTIVE = 'adaptive'
+}
+
+export interface ProgressiveRenderParams extends RenderParams {
+  progressiveMode: ProgressiveMode;
+  progressiveStage: number;
+  qualityLevel: number;
+  previousTransform?: {
+    centerX: number;
+    centerY: number;
+    scale: number;
+  };
 }
 
 export class WebGLRenderer {
@@ -22,6 +44,11 @@ export class WebGLRenderer {
   private lastRenderTime = 0;
   private frameCount = 0;
   private renderCallback?: (stats: { renderTime: number; fps: number }) => void;
+  
+  // Progressive rendering state
+  private previousFrameTexture: WebGLTexture | null = null;
+  private frameBuffer: WebGLFramebuffer | null = null;
+  private lastTransform: { centerX: number; centerY: number; scale: number } | null = null;
 
   async init(canvas: HTMLCanvasElement): Promise<void> {
     this.canvas = canvas;
@@ -50,6 +77,7 @@ export class WebGLRenderer {
     this.setupShaders();
     this.setupGeometry();
     this.setupUniforms();
+    this.setupProgressive();
     
     console.log('WebGL2 renderer initialized');
   }
@@ -134,6 +162,15 @@ export class WebGLRenderer {
       'u_colorScheme',
       'u_colorOffset',
       'u_colorScale',
+      'u_progressiveMode',
+      'u_progressiveStage',
+      'u_previousTexture',
+      'u_previousTransform',
+      'u_antiAliasing',
+      'u_aaQuality',
+      'u_histogramEqualization',
+      'u_histogramTexture',
+      'u_totalPixels',
     ];
 
     for (const name of uniformNames) {
@@ -141,6 +178,127 @@ export class WebGLRenderer {
       if (this.uniforms[name] === null) {
         console.warn(`Uniform ${name} not found in shader`);
       }
+    }
+  }
+
+  private setupProgressive(): void {
+    const gl = this.gl!;
+    
+    // Create texture for previous frame
+    this.previousFrameTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.previousFrameTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    
+    // Create framebuffer for offscreen rendering
+    this.frameBuffer = gl.createFramebuffer();
+  }
+
+  renderProgressive(params: ProgressiveRenderParams): void {
+    if (!this.gl || !this.program) return;
+
+    const startTime = performance.now();
+    const gl = this.gl;
+
+    // Update viewport to match current canvas size
+    gl.viewport(0, 0, this.canvas!.width, this.canvas!.height);
+
+    gl.useProgram(this.program);
+
+    // Set standard uniforms
+    if (this.uniforms.u_resolution) {
+      gl.uniform2f(this.uniforms.u_resolution, this.canvas!.width, this.canvas!.height);
+    }
+    if (this.uniforms.u_center) {
+      gl.uniform2f(this.uniforms.u_center, params.centerX, params.centerY);
+    }
+    if (this.uniforms.u_scale) {
+      gl.uniform1f(this.uniforms.u_scale, params.scale);
+    }
+    if (this.uniforms.u_maxIterations) {
+      gl.uniform1i(this.uniforms.u_maxIterations, Math.floor(params.maxIterations * params.qualityLevel));
+    }
+    if (this.uniforms.u_colorScheme) {
+      gl.uniform1i(this.uniforms.u_colorScheme, params.colorScheme);
+    }
+    if (this.uniforms.u_colorOffset) {
+      gl.uniform1f(this.uniforms.u_colorOffset, params.colorOffset);
+    }
+    if (this.uniforms.u_colorScale) {
+      gl.uniform1f(this.uniforms.u_colorScale, params.colorScale);
+    }
+
+    // Set progressive rendering uniforms
+    if (this.uniforms.u_progressiveMode) {
+      const modeMap = {
+        [ProgressiveMode.FULL]: 0,
+        [ProgressiveMode.REPROJECTION]: 1,
+        [ProgressiveMode.STOCHASTIC]: 2,
+        [ProgressiveMode.INTERLEAVED]: 3,
+        [ProgressiveMode.ADAPTIVE]: 4
+      };
+      gl.uniform1i(this.uniforms.u_progressiveMode, modeMap[params.progressiveMode]);
+    }
+    if (this.uniforms.u_progressiveStage) {
+      gl.uniform1i(this.uniforms.u_progressiveStage, params.progressiveStage);
+    }
+    
+    // Bind previous frame texture if available
+    if (this.uniforms.u_previousTexture && this.previousFrameTexture) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.previousFrameTexture);
+      gl.uniform1i(this.uniforms.u_previousTexture, 1);
+    }
+    
+    // Set previous transform for reprojection
+    if (this.uniforms.u_previousTransform && params.previousTransform) {
+      gl.uniform3f(this.uniforms.u_previousTransform, 
+        params.previousTransform.centerX,
+        params.previousTransform.centerY, 
+        params.previousTransform.scale);
+    }
+
+    // Set anti-aliasing uniforms
+    if (this.uniforms.u_antiAliasing) {
+      gl.uniform1i(this.uniforms.u_antiAliasing, params.antiAliasing ? 1 : 0);
+    }
+    if (this.uniforms.u_aaQuality) {
+      gl.uniform1f(this.uniforms.u_aaQuality, params.aaQuality || 2.0);
+    }
+
+    // Set histogram equalization uniforms
+    if (this.uniforms.u_histogramEqualization) {
+      gl.uniform1i(this.uniforms.u_histogramEqualization, params.histogramEqualization ? 1 : 0);
+    }
+
+    // Draw the full-screen quad
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Save current frame to texture for next reprojection
+    if (params.progressiveMode === ProgressiveMode.REPROJECTION || 
+        params.progressiveStage === 0) {
+      this.saveFrameTexture();
+    }
+
+    // Store current transform
+    this.lastTransform = {
+      centerX: params.centerX,
+      centerY: params.centerY,
+      scale: params.scale
+    };
+
+    // Calculate performance stats
+    const renderTime = performance.now() - startTime;
+    this.frameCount++;
+    
+    const now = performance.now();
+    const fps = this.lastRenderTime > 0 ? 1000 / (now - this.lastRenderTime) : 0;
+    this.lastRenderTime = now;
+
+    if (this.renderCallback) {
+      this.renderCallback({ renderTime, fps });
     }
   }
 
@@ -179,6 +337,27 @@ export class WebGLRenderer {
       gl.uniform1f(this.uniforms.u_colorScale, params.colorScale);
     }
 
+    // Set progressive rendering uniforms to safe defaults for regular rendering
+    if (this.uniforms.u_progressiveMode) {
+      gl.uniform1i(this.uniforms.u_progressiveMode, 0); // FULL mode
+    }
+    if (this.uniforms.u_progressiveStage) {
+      gl.uniform1i(this.uniforms.u_progressiveStage, 0);
+    }
+
+    // Set anti-aliasing uniforms
+    if (this.uniforms.u_antiAliasing) {
+      gl.uniform1i(this.uniforms.u_antiAliasing, params.antiAliasing ? 1 : 0);
+    }
+    if (this.uniforms.u_aaQuality) {
+      gl.uniform1f(this.uniforms.u_aaQuality, params.aaQuality || 2.0);
+    }
+
+    // Set histogram equalization uniforms
+    if (this.uniforms.u_histogramEqualization) {
+      gl.uniform1i(this.uniforms.u_histogramEqualization, params.histogramEqualization ? 1 : 0);
+    }
+
     // Draw the full-screen quad
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -195,6 +374,28 @@ export class WebGLRenderer {
     }
   }
 
+  private saveFrameTexture(): void {
+    if (!this.gl || !this.previousFrameTexture || !this.canvas) return;
+    
+    const gl = this.gl;
+    
+    // Read pixels from current framebuffer
+    const pixels = new Uint8Array(this.canvas.width * this.canvas.height * 4);
+    gl.readPixels(0, 0, this.canvas.width, this.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    
+    // Update texture with pixel data
+    gl.bindTexture(gl.TEXTURE_2D, this.previousFrameTexture);
+    gl.texImage2D(
+      gl.TEXTURE_2D, 0, gl.RGBA,
+      this.canvas.width, this.canvas.height, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, pixels
+    );
+  }
+
+  getLastTransform(): { centerX: number; centerY: number; scale: number } | null {
+    return this.lastTransform;
+  }
+
   setRenderCallback(callback: (stats: { renderTime: number; fps: number }) => void): void {
     this.renderCallback = callback;
   }
@@ -207,6 +408,12 @@ export class WebGLRenderer {
       if (this.program) {
         this.gl.deleteProgram(this.program);
       }
+      if (this.previousFrameTexture) {
+        this.gl.deleteTexture(this.previousFrameTexture);
+      }
+      if (this.frameBuffer) {
+        this.gl.deleteFramebuffer(this.frameBuffer);
+      }
     }
     
     this.gl = null;
@@ -215,5 +422,8 @@ export class WebGLRenderer {
     this.uniforms = {};
     this.canvas = null;
     this.renderCallback = undefined;
+    this.previousFrameTexture = null;
+    this.frameBuffer = null;
+    this.lastTransform = null;
   }
 }

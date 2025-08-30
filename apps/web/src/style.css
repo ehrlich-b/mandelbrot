@@ -153,3 +153,175 @@ html, body {
 :fullscreen .controls:hover {
   opacity: 1;
 }
+
+/* Mobile and Touch Device Optimizations */
+@media (max-width: 768px) {
+  .controls {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+    font-size: 14px;
+  }
+  
+  .controls button {
+    padding: 12px 16px;
+    font-size: 14px;
+    min-height: 44px; /* iOS touch target minimum */
+    touch-action: manipulation;
+  }
+  
+  .palette-selector,
+  .iteration-control {
+    width: 100%;
+    margin: 4px 0;
+  }
+  
+  .palette-selector select,
+  .iteration-control input {
+    min-height: 44px;
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+  
+  .presets {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  
+  .presets button {
+    flex: 1;
+    min-width: 100px;
+  }
+  
+  .hud {
+    font-size: 12px;
+    padding: 6px;
+    max-width: calc(100vw - 20px);
+  }
+}
+
+@media (max-width: 480px) {
+  .controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    border-radius: 0;
+    max-height: 50vh;
+    overflow-y: auto;
+    z-index: 1000;
+  }
+  
+  .controls button {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  
+  .presets button {
+    min-width: 80px;
+    font-size: 12px;
+  }
+  
+  .hud {
+    font-size: 11px;
+    padding: 4px 6px;
+    top: 8px;
+    left: 8px;
+  }
+}
+
+/* Touch-specific improvements */
+@media (hover: none) and (pointer: coarse) {
+  .controls {
+    opacity: 0.9;
+  }
+  
+  .controls:focus-within {
+    opacity: 1;
+  }
+  
+  :fullscreen .hud,
+  :fullscreen .controls {
+    opacity: 0.7;
+  }
+  
+  :fullscreen .hud:focus-within,
+  :fullscreen .controls:focus-within {
+    opacity: 1;
+  }
+}
+
+/* Palette Editor Styling */
+.palette-editor {
+  margin: 8px 0;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.palette-editor label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: bold;
+  color: #fff;
+}
+
+.palette-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.color-offset-control,
+.color-scale-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.color-offset-control label,
+.color-scale-control label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: normal;
+  min-width: 70px;
+}
+
+.color-offset-control input,
+.color-scale-control input {
+  flex: 1;
+  min-width: 80px;
+}
+
+.color-offset-control span,
+.color-scale-control span {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+  min-width: 30px;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .palette-controls {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .color-offset-control,
+  .color-scale-control {
+    min-width: auto;
+  }
+  
+  .color-offset-control label,
+  .color-scale-control label {
+    min-width: 60px;
+    font-size: 11px;
+  }
+}
