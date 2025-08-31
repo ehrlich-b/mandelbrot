@@ -45,7 +45,7 @@ const vec2 DD_ZERO = vec2(0.0, 0.0);
 const vec2 DD_ONE = vec2(1.0, 0.0);
 const vec2 DD_TWO = vec2(2.0, 0.0);
 const vec2 DD_HALF = vec2(0.5, 0.0);
-const float DD_SPLIT = 4097.0;
+const float DD_SPLIT = 134217729.0; // 2^27 + 1 for proper double-double arithmetic
 
 vec2 dd_fast_two_sum(float a, float b) {
     float s = a + b;
@@ -86,9 +86,12 @@ float dd_to_float(vec2 dd) {
 }
 
 vec2 dd_add(vec2 a, vec2 b) {
+    // Match TypeScript implementation structure
     vec2 s = dd_two_sum(a.x, b.x);
     vec2 f = dd_two_sum(a.y, b.y);
-    vec2 c = vec2(s.y + f.x, f.y);
+    // Inline normalize: c = normalize(e + f.hi, f.lo)  
+    vec2 c_temp = vec2(s.y + f.x, f.y);
+    vec2 c = dd_fast_two_sum(c_temp.x, c_temp.y);
     return dd_fast_two_sum(s.x, c.x + c.y);
 }
 
@@ -97,6 +100,7 @@ vec2 dd_sub(vec2 a, vec2 b) {
 }
 
 vec2 dd_mul(vec2 a, vec2 b) {
+    // Match TypeScript implementation exactly
     vec2 p = dd_two_product(a.x, b.x);
     float err2 = a.x * b.y + a.y * b.x;
     return dd_fast_two_sum(p.x, p.y + err2);
@@ -260,7 +264,7 @@ float mandelbrotDD(vec4 c) {
 
 // Convert viewport UV to complex coordinates
 vec4 viewportToComplexDD(vec2 uv) {
-    // Calculate DD coordinates: center + uv * scale
+    // Calculate DD coordinates: center + uv * scale (matching standard precision logic)
     vec2 re = dd_add(u_center_dd.xy, dd_mul(dd_from_float(uv.x), u_scale_dd));
     vec2 im = dd_add(u_center_dd.zw, dd_mul(dd_from_float(uv.y), u_scale_dd));
     return vec4(re.x, re.y, im.x, im.y);
@@ -270,6 +274,13 @@ void main() {
     // Convert screen coordinates to complex plane
     vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
     vec2 uv = (v_texCoord - 0.5) * aspectRatio;
+    
+    // Simple uniform references to prevent optimization (minimal impact)
+    if (u_progressiveMode < -999 || u_progressiveStage < -999 || u_aaQuality < 0.0 || !u_antiAliasing) {
+        // Never true, just prevents uniform optimization
+        fragColor = texture(u_previousTexture, v_texCoord);
+        return;
+    }
     
     float mu;
     
@@ -289,7 +300,18 @@ void main() {
         return;
     }
     
-    // Apply coloring
+    // Apply histogram equalization and coloring
+    mu = histogramEqualize(mu);
     vec3 color = getColor(mu, u_colorScheme);
+    
+    // TODO: Implement anti-aliasing in DD shader (future feature)
+    
+    // Simple DD mode visual indicator: add slight blue tint to verify DD is active
+    if (u_use_dd_precision) {
+        // Add a very subtle blue tint to prove DD mode is working
+        fragColor = vec4(color * 0.95 + vec3(0.0, 0.0, 0.05), 1.0);
+        return;
+    }
+    
     fragColor = vec4(color, 1.0);
 }

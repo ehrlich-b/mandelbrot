@@ -52,6 +52,22 @@ export const defaultBookmarks: BookmarkData[] = [
     scale: 0.01,
     maxIterations: 512,
     colorScheme: 3,
+  },
+  {
+    name: 'Deep Zoom 1 (DD Required)',
+    centerX: -0.7533421,
+    centerY: 0.11381312,
+    scale: 0.00000001,  // 1e-8, requires DD precision
+    maxIterations: 2048,
+    colorScheme: 1,
+  },
+  {
+    name: 'Deep Zoom 2 (DD Required)',
+    centerX: -1.25066,
+    centerY: 0.02012,
+    scale: 0.000000001,  // 1e-9, requires DD precision
+    maxIterations: 3000,
+    colorScheme: 4,
   }
 ];
 

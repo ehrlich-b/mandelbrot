@@ -31,7 +31,7 @@ export interface DDRenderParams extends RenderParams {
  * Precision management utilities
  */
 export class PrecisionManager {
-  private static readonly DD_THRESHOLD = 1e-14;       // When to switch to DD arithmetic
+  private static readonly DD_THRESHOLD = 1e-8;       // When to switch to DD arithmetic (early enough for clean 1e-6)
   
   /**
    * Determine if double-double precision is needed based on zoom scale
@@ -73,6 +73,9 @@ export class WebGLRendererDD {
   private ddProgram: WebGLProgram | null = null;
   private vertexBuffer: WebGLBuffer | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  
+  // Debug tracking
+  private lastDDState = false;
   
   // Uniforms for both programs
   private standardUniforms: Record<string, WebGLUniformLocation | null> = {};
@@ -228,8 +231,12 @@ export class WebGLRendererDD {
     
     for (const name of uniformNames) {
       uniforms[name] = gl.getUniformLocation(program, name);
-      if (uniforms[name] === null && name !== 'u_center_dd' && name !== 'u_scale_dd' && name !== 'u_use_dd_precision') {
-        console.warn(`Uniform ${name} not found in shader`);
+      if (uniforms[name] === null) {
+        // Only warn for uniforms that should exist in both shaders
+        const ddOnlyUniforms = ['u_center_dd', 'u_scale_dd', 'u_use_dd_precision'];
+        if (!ddOnlyUniforms.includes(name)) {
+          console.warn(`Uniform ${name} not found in shader`);
+        }
       }
     }
     
@@ -304,15 +311,16 @@ export class WebGLRendererDD {
   private setDDUniforms(params: DDRenderParams, uniforms: Record<string, WebGLUniformLocation | null>): void {
     const gl = this.gl!;
 
-    // Set DD-specific uniforms
-    if (uniforms.u_center_dd && (params.centerXDD || params.centerYDD)) {
+    // Set DD-specific uniforms (always set them when using DD precision)
+    if (uniforms.u_center_dd) {
       const centerXDD = params.centerXDD || PrecisionManager.numberToDD(params.centerX);
       const centerYDD = params.centerYDD || PrecisionManager.numberToDD(params.centerY);
       gl.uniform4f(uniforms.u_center_dd, centerXDD.hi, centerXDD.lo, centerYDD.hi, centerYDD.lo);
     }
     
-    if (uniforms.u_scale_dd && params.scaleDD) {
-      gl.uniform2f(uniforms.u_scale_dd, params.scaleDD.hi, params.scaleDD.lo);
+    if (uniforms.u_scale_dd) {
+      const scaleDD = params.scaleDD || PrecisionManager.numberToDD(params.scale);
+      gl.uniform2f(uniforms.u_scale_dd, scaleDD.hi, scaleDD.lo);
     }
     
     if (uniforms.u_use_dd_precision) {
@@ -334,6 +342,12 @@ export class WebGLRendererDD {
     
     const program = needsDD ? this.ddProgram : this.standardProgram;
     const uniforms = needsDD ? this.ddUniforms : this.standardUniforms;
+    
+    // Debug logging for precision switching
+    if (needsDD !== this.lastDDState) {
+      console.log(`Precision switch: ${needsDD ? 'STANDARD → DD' : 'DD → STANDARD'} (scale: ${params.scale.toExponential()})`);
+      this.lastDDState = needsDD;
+    }
     
     if (!program) {
       console.error('Shader program not available');
@@ -426,6 +440,15 @@ export class WebGLRendererDD {
       needsHighPrecision,
       effectiveDigits: needsHighPrecision ? 32 : 15,
       scale
+    };
+  }
+
+  getLastTransform(): { centerX: number; centerY: number; scale: number } | null {
+    if (!this.lastTransform) return null;
+    return {
+      centerX: this.lastTransform.centerX,
+      centerY: this.lastTransform.centerY,
+      scale: this.lastTransform.scale
     };
   }
 

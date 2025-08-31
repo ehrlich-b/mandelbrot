@@ -1,4 +1,5 @@
 import { WebGLRenderer, ProgressiveMode, type ProgressiveRenderParams } from './render/WebGLRenderer';
+import { WebGLRendererDD, type DDRenderParams } from './render/WebGLRendererDD';
 import { InputHandler } from './input/InputHandler';
 import { HUD } from './ui/HUD';
 import { Controls } from './ui/Controls';
@@ -12,7 +13,7 @@ export interface RenderStats {
 
 export class MandelbrotViewer {
   private canvas: HTMLCanvasElement;
-  private renderer: WebGLRenderer;
+  private renderer: WebGLRendererDD;
   private inputHandler: InputHandler;
   private hud: HUD;
   private controls: Controls;
@@ -49,7 +50,7 @@ export class MandelbrotViewer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.renderer = new WebGLRenderer();
+    this.renderer = new WebGLRendererDD();
     this.inputHandler = new InputHandler(canvas);
     this.hud = new HUD();
     this.controls = new Controls();
@@ -335,7 +336,7 @@ export class MandelbrotViewer {
         console.log('Progressive rendering completed');
       }
     } else {
-      // Use traditional full rendering
+      // Use traditional full rendering with DD precision support
       this.renderer.render({
         centerX: this.viewport.centerX,
         centerY: this.viewport.centerY,
@@ -349,6 +350,7 @@ export class MandelbrotViewer {
         antiAliasing: this.antiAliasingEnabled,
         aaQuality: this.aaQuality,
         histogramEqualization: this.histogramEqualizationEnabled,
+        useAutoPrecision: true, // Enable automatic precision switching
       });
     }
 
@@ -385,6 +387,23 @@ export class MandelbrotViewer {
 
   setViewport(viewport: Partial<ViewportState>): void {
     store.setViewport(viewport);
+  }
+
+  /**
+   * Jump to deep zoom coordinates using high precision
+   */
+  gotoDeepZoom(centerX: string, centerY: string, scale: string, iterations?: number): void {
+    const ddParams = this.renderer.setHighPrecisionCoordinates(centerX, centerY, scale);
+    store.setViewport({
+      centerX: ddParams.centerX,
+      centerY: ddParams.centerY,
+      scale: ddParams.scale,
+      maxIterations: iterations || Math.min(8192, Math.max(1000, Math.floor(2000 - Math.log10(ddParams.scale) * 100))),
+    });
+    
+    // Log precision info
+    const precisionInfo = this.renderer.getPrecisionInfo();
+    console.log(`Deep zoom activated: ${precisionInfo.currentPrecision} precision (${precisionInfo.effectiveDigits} digits)`);
   }
 
   private toggleFullscreen(): void {
