@@ -1,5 +1,6 @@
 /**
  * Unit tests for double-double arithmetic implementation
+ * @vitest-environment node
  */
 
 import { describe, it, expect } from 'vitest';
@@ -22,6 +23,7 @@ import {
 
 import {
   complexDDFromNumbers,
+  complexDDToNumbers,
   complexDDAdd,
   complexDDMul,
   complexDDSqr,

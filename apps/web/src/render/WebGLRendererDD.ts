@@ -12,20 +12,9 @@ import {
   DoubleDouble, 
   ddFromNumber, 
   ddToNumber, 
-  ddFromString,
-  ddAdd,
-  ddMul,
-  ddDiv,
-  ddSub,
-  ddToString
+  ddFromString
 } from '../math/dd.js';
-import {
-  ComplexDD,
-  complexDDFromNumbers,
-  complexDDToNumbers,
-  complexDDToString
-} from '../math/complex-dd.js';
-import { RenderParams, ProgressiveRenderParams, ProgressiveMode } from './WebGLRenderer.js';
+import { RenderParams } from './WebGLRenderer.js';
 
 export interface DDRenderParams extends RenderParams {
   // Enhanced precision coordinates
@@ -42,7 +31,6 @@ export interface DDRenderParams extends RenderParams {
  * Precision management utilities
  */
 export class PrecisionManager {
-  private static readonly FLOAT64_MIN_SCALE = 1e-15;  // Approximate limit for float64
   private static readonly DD_THRESHOLD = 1e-14;       // When to switch to DD arithmetic
   
   /**

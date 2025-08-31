@@ -22,7 +22,6 @@ import {
   ddIsZero,
   ddIsFinite,
   DD_ZERO,
-  DD_ONE,
   DD_TWO
 } from './dd.js';
 
