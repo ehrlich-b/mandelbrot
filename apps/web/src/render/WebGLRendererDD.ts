@@ -31,13 +31,14 @@ export interface DDRenderParams extends RenderParams {
  * Precision management utilities
  */
 export class PrecisionManager {
-  private static readonly DD_THRESHOLD = 1e-8;       // When to switch to DD arithmetic (early enough for clean 1e-6)
+  private static readonly DD_THRESHOLD = 5e-6;       // When to switch to DD arithmetic (activate at 1e-6 and smaller)
   
   /**
    * Determine if double-double precision is needed based on zoom scale
    */
   static needsHighPrecision(scale: number): boolean {
-    return scale < this.DD_THRESHOLD;
+    const needs = scale < this.DD_THRESHOLD;
+    return needs;
   }
   
   /**
