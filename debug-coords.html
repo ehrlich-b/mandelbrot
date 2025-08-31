@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DD Coordinate Debug Test</title>
+</head>
+<body>
+    <h1>Deep Zoom Coordinate Debug</h1>
+    <p>This will navigate to deep zoom and show coordinate mapping.</p>
+    <p><strong>Expected:</strong> Color gradient (red left-right, green top-bottom) if coordinates work</p>
+    <p><strong>Actual:</strong> <span id="result">Testing...</span></p>
+    
+    <script>
+        // Navigate to localhost:3000 and test deep zoom
+        window.location.href = 'http://localhost:3000';
+        
+        // After page loads, navigate to deep zoom
+        setTimeout(() => {
+            if (window.mandelbrot) {
+                window.mandelbrot.setViewport({
+                    centerX: -0.7533,
+                    centerY: 0.1138,
+                    scale: 1e-6,  // Deep zoom to trigger DD mode
+                    maxIterations: 500
+                });
+                
+                document.getElementById('result').textContent = 'Navigated to deep zoom - check canvas for gradient';
+            } else {
+                document.getElementById('result').textContent = 'mandelbrot object not found';
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

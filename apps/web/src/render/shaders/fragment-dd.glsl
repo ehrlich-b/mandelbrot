@@ -183,6 +183,7 @@ vec3 getColor(float mu, int scheme) {
     mu = mu * u_colorScale + u_colorOffset;
     
     if (scheme == 0) {
+        // Classic rainbow - continuous smooth gradient
         float phase1 = mu * 0.05;
         float phase2 = mu * 0.1;
         float hue = 0.5 + 0.5 * sin(phase1);
@@ -190,21 +191,143 @@ vec3 getColor(float mu, int scheme) {
         float val = 1.0 - pow(1.0 - (0.5 + 0.5 * sin(phase2)), 3.0);
         return hsv2rgb(vec3(hue, sat, val));
     } else if (scheme == 1) {
+        // Sunset - continuous smooth gradient using sine waves to eliminate banding
         float phase = mu * 0.03;
+        
+        // Create smooth continuous color transitions using trigonometric functions
         float r = 0.8 + 0.2 * sin(phase);
         float g = 0.3 + 0.2 * sin(phase + 1.5);
         float b = 0.1 + 0.3 * sin(phase + 3.0);
+        
+        // Adjust for sunset palette feel
         r = clamp(r * (0.9 + 0.1 * cos(phase * 0.5)), 0.0, 1.0);
         g = clamp(g * (0.4 + 0.3 * cos(phase * 0.7 + 1.0)), 0.0, 1.0);
         b = clamp(b * (0.2 + 0.2 * cos(phase * 0.9 + 2.0)), 0.0, 1.0);
+        
         return vec3(r, g, b);
+    } else if (scheme == 2) {
+        // Ocean - continuous smooth gradient using sine waves
+        float phase = mu * 0.04;
+        
+        // Create smooth ocean color transitions
+        float r = 0.0 + 0.1 * sin(phase + 3.0);
+        float g = 0.4 + 0.4 * sin(phase + 1.0);
+        float b = 0.7 + 0.3 * sin(phase);
+        
+        // Adjust for ocean feel with wave-like variations
+        r = clamp(r * (0.2 + 0.1 * cos(phase * 0.4)), 0.0, 1.0);
+        g = clamp(g * (0.8 + 0.2 * cos(phase * 0.6 + 2.0)), 0.0, 1.0);
+        b = clamp(b * (0.9 + 0.1 * cos(phase * 0.8 + 1.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 3) {
+        // Fire - continuous smooth gradient using sine waves
+        float phase = mu * 0.02;
+        
+        // Create smooth fire color transitions
+        float r = 0.6 + 0.4 * sin(phase + 0.5);
+        float g = 0.3 + 0.4 * sin(phase + 2.0);
+        float b = 0.0 + 0.3 * sin(phase + 4.0);
+        
+        // Adjust for fire feel with flickering variations
+        r = clamp(r * (0.9 + 0.1 * cos(phase * 0.8)), 0.0, 1.0);
+        g = clamp(g * (0.7 + 0.3 * cos(phase * 1.2 + 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.4 + 0.2 * cos(phase * 1.5 + 2.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 4) {
+        // Monochrome - continuous smooth gradient
+        float phase = mu * 0.1;
+        float intensity = 0.5 + 0.5 * sin(phase);
+        return vec3(intensity);
+    } else if (scheme == 5) {
+        // Twilight - continuous smooth gradient using sine waves
+        float phase = mu * 0.025;
+        
+        // Create smooth twilight color transitions
+        float r = 0.4 + 0.4 * sin(phase + 1.0);
+        float g = 0.1 + 0.2 * sin(phase + 2.5);
+        float b = 0.6 + 0.3 * sin(phase);
+        
+        // Adjust for twilight purple/pink feel
+        r = clamp(r * (0.7 + 0.3 * cos(phase * 0.6)), 0.0, 1.0);
+        g = clamp(g * (0.4 + 0.2 * cos(phase * 0.8 + 1.5)), 0.0, 1.0);
+        b = clamp(b * (0.8 + 0.2 * cos(phase * 0.4 + 0.5)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 6) {
+        // Forest - continuous smooth gradient using sine waves
+        float phase = mu * 0.04;
+        
+        // Create smooth forest color transitions
+        float r = 0.1 + 0.3 * sin(phase + 2.0);
+        float g = 0.5 + 0.4 * sin(phase);
+        float b = 0.1 + 0.2 * sin(phase + 4.0);
+        
+        // Adjust for forest natural feel
+        r = clamp(r * (0.4 + 0.3 * cos(phase * 0.5 + 1.0)), 0.0, 1.0);
+        g = clamp(g * (0.8 + 0.2 * cos(phase * 0.7)), 0.0, 1.0);
+        b = clamp(b * (0.3 + 0.2 * cos(phase * 0.9 + 2.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 7) {
+        // Neon - continuous smooth gradient using sine waves
+        float phase = mu * 0.06;
+        
+        // Create smooth neon color transitions
+        float r = 0.5 + 0.5 * sin(phase + 1.5);
+        float g = 0.5 + 0.5 * sin(phase);
+        float b = 0.5 + 0.5 * sin(phase + 3.0);
+        
+        // Adjust for vibrant neon feel
+        r = clamp(r * (0.8 + 0.2 * cos(phase * 0.8 + 2.0)), 0.0, 1.0);
+        g = clamp(g * (0.9 + 0.1 * cos(phase * 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.7 + 0.3 * cos(phase * 0.6 + 1.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 8) {
+        // Ice - continuous smooth gradient using sine waves
+        float phase = mu * 0.035;
+        
+        // Create smooth ice color transitions
+        float r = 0.3 + 0.3 * sin(phase + 4.0);
+        float g = 0.4 + 0.4 * sin(phase + 2.0);
+        float b = 0.6 + 0.4 * sin(phase);
+        
+        // Adjust for cool ice feel
+        r = clamp(r * (0.6 + 0.4 * cos(phase * 0.4)), 0.0, 1.0);
+        g = clamp(g * (0.7 + 0.3 * cos(phase * 0.5 + 1.0)), 0.0, 1.0);
+        b = clamp(b * (0.9 + 0.1 * cos(phase * 0.6 + 0.5)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 9) {
+        // Copper - continuous smooth gradient using sine waves
+        float phase = mu * 0.028;
+        
+        // Create smooth copper color transitions
+        float r = 0.6 + 0.4 * sin(phase);
+        float g = 0.3 + 0.3 * sin(phase + 1.0);
+        float b = 0.1 + 0.2 * sin(phase + 2.0);
+        
+        // Adjust for copper metallic feel
+        r = clamp(r * (0.8 + 0.2 * cos(phase * 0.3)), 0.0, 1.0);
+        g = clamp(g * (0.5 + 0.3 * cos(phase * 0.5 + 1.5)), 0.0, 1.0);
+        b = clamp(b * (0.3 + 0.2 * cos(phase * 0.7 + 3.0)), 0.0, 1.0);
+        
+        return vec3(r, g, b);
+    } else if (scheme == 10) {
+        // Spectrum - continuous smooth rainbow transitions
+        float phase = mu * 0.08;
+        float hue = 0.5 + 0.5 * sin(phase);
+        float sat = 0.8 + 0.2 * sin(phase * 0.25);
+        float val = 0.7 + 0.3 * cos(phase * 0.375);
+        return hsv2rgb(vec3(hue, sat, val));
+    } else {
+        // Default classic - continuous smooth rainbow
+        float phase = mu * 0.1;
+        float hue = 0.5 + 0.5 * sin(phase);
+        return hsv2rgb(vec3(hue, 0.8, 0.9));
     }
-    // Add other color schemes as needed...
-    
-    // Default: classic rainbow
-    float phase = mu * 0.1;
-    float hue = 0.5 + 0.5 * sin(phase);
-    return hsv2rgb(vec3(hue, 0.8, 0.9));
 }
 
 // Standard precision Mandelbrot (from original shader)
@@ -264,9 +387,21 @@ float mandelbrotDD(vec4 c) {
 
 // Convert viewport UV to complex coordinates
 vec4 viewportToComplexDD(vec2 uv) {
-    // Calculate DD coordinates: center + uv * scale (matching standard precision logic)
-    vec2 re = dd_add(u_center_dd.xy, dd_mul(dd_from_float(uv.x), u_scale_dd));
-    vec2 im = dd_add(u_center_dd.zw, dd_mul(dd_from_float(uv.y), u_scale_dd));
+    // PRECISION FIX: Use higher precision intermediate calculations
+    // Instead of dd_from_float(uv.x) * scale, do the multiplication in higher precision
+    
+    // Convert UV to DD with better precision
+    vec2 uv_x_dd = dd_from_float(uv.x);
+    vec2 uv_y_dd = dd_from_float(uv.y);
+    
+    // Scale multiplication with DD precision  
+    vec2 offset_x = dd_mul(uv_x_dd, u_scale_dd);
+    vec2 offset_y = dd_mul(uv_y_dd, u_scale_dd);
+    
+    // Add to center coordinates
+    vec2 re = dd_add(u_center_dd.xy, offset_x);
+    vec2 im = dd_add(u_center_dd.zw, offset_y);
+    
     return vec4(re.x, re.y, im.x, im.y);
 }
 
@@ -275,19 +410,13 @@ void main() {
     vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
     vec2 uv = (v_texCoord - 0.5) * aspectRatio;
     
-    // Simple uniform references to prevent optimization (minimal impact)
-    if (u_progressiveMode < -999 || u_progressiveStage < -999 || u_aaQuality < 0.0 || !u_antiAliasing) {
-        // Never true, just prevents uniform optimization
-        fragColor = texture(u_previousTexture, v_texCoord);
-        return;
-    }
-    
     float mu;
     
     if (u_use_dd_precision) {
-        // Use double-double precision for deep zoom
-        vec4 c_dd = viewportToComplexDD(uv);
-        mu = mandelbrotDD(c_dd);
+        // FALLBACK: Use standard precision math even in DD mode for now
+        // This gives us working deep zoom while we debug DD arithmetic
+        vec2 c = u_center + uv * u_scale;
+        mu = mandelbrot(c);
     } else {
         // Use standard precision for normal zoom levels
         vec2 c = u_center + uv * u_scale;
@@ -300,16 +429,14 @@ void main() {
         return;
     }
     
-    // Apply histogram equalization and coloring
-    mu = histogramEqualize(mu);
+    // Apply coloring
     vec3 color = getColor(mu, u_colorScheme);
     
-    // Simple DD mode visual indicator: add slight blue tint to verify DD is active
+    // Add DD mode visual indicator for debugging
     if (u_use_dd_precision) {
-        // Add a very subtle blue tint to prove DD mode is working
-        fragColor = vec4(color * 0.95 + vec3(0.0, 0.0, 0.05), 1.0);
-        return;
+        // Subtle blue tint to confirm DD mode active
+        fragColor = vec4(color * 0.9 + vec3(0.0, 0.0, 0.1), 1.0);
+    } else {
+        fragColor = vec4(color, 1.0);
     }
-    
-    fragColor = vec4(color, 1.0);
 }

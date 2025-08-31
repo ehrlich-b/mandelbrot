@@ -114,33 +114,32 @@
   - [ ] Performance profiling guide  
   - [ ] Contributing guidelines
 
-## 🎯 **CURRENT STATUS: DEEP ZOOM ACTIVE**
+## ⚠️ **CURRENT STATUS: DEEP ZOOM PARTIALLY IMPLEMENTED**
 
-**The deep zoom renderer is now LIVE and working!**
+**Reality Check**: Deep zoom has fundamental limitations at extreme scales.
 
-### ✅ What's Working Now:
-1. **Double-double precision arithmetic** (128-bit effective precision) ✅ **DEBUGGED & FIXED**
-2. **Automatic precision switching** when scale < 1e-8 ✅ **VERIFIED WORKING** 
-3. **WebGLRendererDD integrated** into main viewer ✅ **ACTIVE**
-4. **Deep zoom bookmarks** available in UI (scales down to 1e-9) ✅
-5. **GPU-accelerated DD arithmetic** via GLSL shaders ✅ **SHADER BUGS FIXED**
-6. **Smooth transitions** between standard and DD precision ✅ **TESTED**
-7. **DD fragment shader compilation** ✅ **FIXED DUPLICATE FUNCTIONS**
-8. **Shader uniform handling** ✅ **FIXED OPTIMIZATION WARNINGS**
-9. **DD arithmetic constants** ✅ **CORRECTED DD_SPLIT = 134217729.0**
+### ✅ What's Actually Working:
+1. **Shader architecture** - DD renderer switches at correct zoom levels ✅
+2. **WebGLRendererDD integration** - Backend selection works ✅  
+3. **UI controls** - Deep zoom bookmarks functional ✅
+4. **Basic DD math** - Some double-double operations work ✅
 
-### 🚀 How to Use Deep Zoom:
-1. **Via Bookmarks**: Click "Deep Zoom 1" or "Deep Zoom 2" bookmarks
-2. **Via Console**: `window.mandelbrot.gotoDeepZoom('-0.7533421123', '0.1138131234', '0.0000000001')`
-3. **Via Manual Zoom**: Zoom deep enough that scale < 1e-8 (auto-switches to DD)
-4. **Visual Indicator**: Subtle blue tint appears when DD precision is active
+### ❌ What's Broken:
+1. **DD arithmetic precision** - GLSL implementation has quantization bugs
+2. **Extreme zoom rendering** - Scale 1e-6 shows solid color (insufficient precision)
+3. **GPU DD calculations** - Creates blocky "grid squares" instead of smooth gradients
+4. **Float32 fallback** - Even standard precision insufficient at test scale
 
-### 📊 Performance:
-- **Standard precision**: ~60+ FPS for normal zoom levels
-- **DD precision**: ~45+ FPS at deep zoom (depends on iterations)  
-- **Memory usage**: ~50MB additional for DD operations
-- **Transition**: Seamless switching between precisions (verified working)
-- **Precision switching**: ~800-1000ms transition time
+### 🔬 **Debugging Results** (see `deep_zoom_debug.md`):
+- **Issue**: At scale 1e-6, need ~1e-9 precision per pixel
+- **Reality**: Float32 provides ~1e-7 precision
+- **Result**: All pixels get identical coordinates → solid color rendering
+- **DD Solution**: GLSL implementation has precision bugs causing quantization
+
+### 📊 Current Capabilities:
+- **Working zoom range**: Down to ~1e-4 (standard precision)
+- **DD mode activates**: At scale < 5e-6 (but renders solid color)
+- **Architecture**: Sound, just needs precision implementation fixes
 
 ### 🔍 Next Steps:
 
