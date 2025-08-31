@@ -310,9 +310,8 @@ vec4 reprojectPrevious(vec2 coord) {
 // Enhanced Mandelbrot iteration with improved smooth coloring
 float mandelbrot(vec2 c) {
     vec2 z = vec2(0.0);
-    vec2 dz = vec2(1.0, 0.0); // Derivative for distance estimation
     int iterations = 0;
-    float escapeRadius = 256.0;
+    float escapeRadius = 4.0; // Standard escape radius
     float escapeRadius2 = escapeRadius * escapeRadius;
     
     for (int i = 0; i < 8192; i++) {
@@ -323,39 +322,19 @@ float mandelbrot(vec2 c) {
         float r2 = x2 + y2;
         
         if (r2 > escapeRadius2) {
-            // Enhanced smooth coloring with better normalization
+            // Simple smooth coloring
             float log_zn = log(r2) * 0.5;
             float nu = log(log_zn / log(2.0)) / log(2.0);
             float mu = float(iterations) + 1.0 - nu;
-            
-            // Optional: Add distance estimation component
-            float r = sqrt(r2);
-            float dr = length(dz);
-            float de = 2.0 * r * log(r) / dr; // Distance estimation
-            
-            // Return smooth iteration count (distance info could be used for shading)
             return max(0.0, mu);
         }
         
-        // Derivative update for distance estimation: dz = 2*z*dz + 1
-        dz = vec2(2.0 * (z.x * dz.x - z.y * dz.y) + 1.0, 
-                  2.0 * (z.x * dz.y + z.y * dz.x));
-        
-        // Main iteration: z = z^2 + c
-        float xy = z.x * z.y;
-        z = vec2(x2 - y2 + c.x, xy + xy + c.y);
+        // Basic mandelbrot iteration: z = z^2 + c
+        z = vec2(x2 - y2 + c.x, 2.0 * z.x * z.y + c.y);
         iterations++;
     }
     
-    // Interior smoothing for points in the set
-    float r2 = dot(z, z);
-    if (r2 < 4.0) {
-        // Use potential function for interior points
-        float potential = log(r2) * 0.5;
-        return -1.0 - potential * 0.1; // Slightly negative for interior
-    }
-    
-    return -1.0; // Deep interior
+    return -1.0; // Interior point
 }
 
 // Gradient-based edge detection for adaptive anti-aliasing

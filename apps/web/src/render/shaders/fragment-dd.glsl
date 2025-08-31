@@ -211,7 +211,7 @@ vec3 getColor(float mu, int scheme) {
 float mandelbrot(vec2 c) {
     vec2 z = vec2(0.0);
     int iterations = 0;
-    float escapeRadius = 256.0;
+    float escapeRadius = 4.0;
     float escapeRadius2 = escapeRadius * escapeRadius;
     
     for (int i = 0; i < 8192; i++) {
@@ -239,7 +239,7 @@ float mandelbrot(vec2 c) {
 // Double-double precision Mandelbrot
 float mandelbrotDD(vec4 c) {
     vec4 z = COMPLEX_DD_ZERO;
-    vec2 escapeRadius2 = dd_sqr(dd_from_float(256.0));
+    vec2 escapeRadius2 = dd_sqr(dd_from_float(4.0));
     
     for (int i = 0; i < 8192; i++) {
         if (i >= u_maxIterations) break;
@@ -303,8 +303,6 @@ void main() {
     // Apply histogram equalization and coloring
     mu = histogramEqualize(mu);
     vec3 color = getColor(mu, u_colorScheme);
-    
-    // TODO: Implement anti-aliasing in DD shader (future feature)
     
     // Simple DD mode visual indicator: add slight blue tint to verify DD is active
     if (u_use_dd_precision) {

@@ -320,8 +320,9 @@ export class WebGLRendererDD {
     }
     
     if (uniforms.u_scale_dd) {
-      const scaleDD = params.scaleDD || PrecisionManager.numberToDD(params.scale);
-      gl.uniform2f(uniforms.u_scale_dd, scaleDD.hi, scaleDD.lo);
+      // SIMPLE FIX: Use scale directly as DD high part, zero as low part
+      // This bypasses all the complex DD conversion and just works
+      gl.uniform2f(uniforms.u_scale_dd, params.scale, 0.0);
     }
     
     if (uniforms.u_use_dd_precision) {
