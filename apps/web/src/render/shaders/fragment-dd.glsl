@@ -36,16 +36,9 @@ uniform float u_aaQuality;
 // Histogram equalization uniforms
 uniform bool u_histogramEqualization;
 
-// Include double-double arithmetic functions
-// Note: In real implementation, this would be included via #include or concatenated
-// For now, we'll include the essential functions directly
-
-// Essential DD constants and functions (subset from dd-arithmetic.glsl)
-const vec2 DD_ZERO = vec2(0.0, 0.0);
-const vec2 DD_ONE = vec2(1.0, 0.0);
-const vec2 DD_TWO = vec2(2.0, 0.0);
-const vec2 DD_HALF = vec2(0.5, 0.0);
-const float DD_SPLIT = 134217729.0; // 2^27 + 1 for proper double-double arithmetic
+// Double-Double Arithmetic from dd-arithmetic.glsl (unified source)
+const float DD_EPS = 5.96046448e-08;  // 2^-24, single-precision machine epsilon in GLSL
+const float DD_SPLIT = 4097.0;        // 2^12 + 1 for 24-bit mantissa (correct value)
 
 vec2 dd_fast_two_sum(float a, float b) {
     float s = a + b;
@@ -81,17 +74,20 @@ vec2 dd_from_float(float x) {
     return vec2(x, 0.0);
 }
 
+vec2 dd_normalize(vec2 dd) {
+    float s = dd.x + dd.y;
+    float e = dd.y - (s - dd.x);
+    return vec2(s, e);
+}
+
 float dd_to_float(vec2 dd) {
     return dd.x + dd.y;
 }
 
 vec2 dd_add(vec2 a, vec2 b) {
-    // Match TypeScript implementation structure
     vec2 s = dd_two_sum(a.x, b.x);
     vec2 f = dd_two_sum(a.y, b.y);
-    // Inline normalize: c = normalize(e + f.hi, f.lo)  
-    vec2 c_temp = vec2(s.y + f.x, f.y);
-    vec2 c = dd_fast_two_sum(c_temp.x, c_temp.y);
+    vec2 c = dd_normalize(vec2(s.y + f.x, f.y));
     return dd_fast_two_sum(s.x, c.x + c.y);
 }
 
@@ -100,7 +96,6 @@ vec2 dd_sub(vec2 a, vec2 b) {
 }
 
 vec2 dd_mul(vec2 a, vec2 b) {
-    // Match TypeScript implementation exactly
     vec2 p = dd_two_product(a.x, b.x);
     float err2 = a.x * b.y + a.y * b.x;
     return dd_fast_two_sum(p.x, p.y + err2);
@@ -120,16 +115,13 @@ float dd_compare(vec2 a, vec2 b) {
     return 0.0;
 }
 
-bool dd_is_zero(vec2 a) {
-    return a.x == 0.0 && a.y == 0.0;
-}
+// DD constants
+const vec2 DD_ZERO = vec2(0.0, 0.0);
+const vec2 DD_ONE = vec2(1.0, 0.0);
+const vec2 DD_TWO = vec2(2.0, 0.0);
 
 // Complex DD functions
 const vec4 COMPLEX_DD_ZERO = vec4(0.0, 0.0, 0.0, 0.0);
-
-vec4 complex_dd_from_floats(float re, float im) {
-    return vec4(re, 0.0, im, 0.0);
-}
 
 vec4 complex_dd_add(vec4 z1, vec4 z2) {
     vec2 re = dd_add(z1.xy, z2.xy);
@@ -385,20 +377,27 @@ float mandelbrotDD(vec4 c) {
     return -1.0; // Interior point
 }
 
-// Convert viewport UV to complex coordinates
-vec4 viewportToComplexDD(vec2 uv) {
-    // PRECISION FIX: Use higher precision intermediate calculations
-    // Instead of dd_from_float(uv.x) * scale, do the multiplication in higher precision
+// Convert pixel coordinates to complex coordinates with DD precision
+// Uses gl_FragCoord to avoid interpolation precision loss
+vec4 pixelToComplexDD() {
+    // Generate pixel coordinates from gl_FragCoord (exact integers)
+    // This avoids precision loss from interpolated v_texCoord
+    vec2 pixel = gl_FragCoord.xy;
     
-    // Convert UV to DD with better precision
-    vec2 uv_x_dd = dd_from_float(uv.x);
-    vec2 uv_y_dd = dd_from_float(uv.y);
+    // Convert to normalized coordinates [-0.5, 0.5] with aspect ratio
+    vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
+    vec2 norm = (pixel / u_resolution - 0.5) * aspectRatio;
     
-    // Scale multiplication with DD precision  
-    vec2 offset_x = dd_mul(uv_x_dd, u_scale_dd);
-    vec2 offset_y = dd_mul(uv_y_dd, u_scale_dd);
+    // Convert normalized coordinates to DD for high precision arithmetic
+    vec2 norm_x_dd = dd_from_float(norm.x);
+    vec2 norm_y_dd = dd_from_float(norm.y);
     
-    // Add to center coordinates
+    // Multiply by scale using DD arithmetic to preserve precision
+    // This is critical: scale might be 1e-9, so pixel-level precision matters
+    vec2 offset_x = dd_mul(norm_x_dd, u_scale_dd);  
+    vec2 offset_y = dd_mul(norm_y_dd, u_scale_dd);
+    
+    // Add offsets to center using DD addition
     vec2 re = dd_add(u_center_dd.xy, offset_x);
     vec2 im = dd_add(u_center_dd.zw, offset_y);
     
@@ -406,19 +405,16 @@ vec4 viewportToComplexDD(vec2 uv) {
 }
 
 void main() {
-    // Convert screen coordinates to complex plane
-    vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 uv = (v_texCoord - 0.5) * aspectRatio;
-    
     float mu;
     
     if (u_use_dd_precision) {
-        // FALLBACK: Use standard precision math even in DD mode for now
-        // This gives us working deep zoom while we debug DD arithmetic
-        vec2 c = u_center + uv * u_scale;
-        mu = mandelbrot(c);
+        // Use double-double precision for deep zoom with gl_FragCoord-based coordinates
+        vec4 c_dd = pixelToComplexDD();
+        mu = mandelbrotDD(c_dd);
     } else {
-        // Use standard precision for normal zoom levels
+        // Use standard precision for normal zoom levels with interpolated UV
+        vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
+        vec2 uv = (v_texCoord - 0.5) * aspectRatio;
         vec2 c = u_center + uv * u_scale;
         mu = mandelbrot(c);
     }

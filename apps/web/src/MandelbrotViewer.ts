@@ -1,5 +1,5 @@
-import { WebGLRenderer, ProgressiveMode, type ProgressiveRenderParams } from './render/WebGLRenderer';
-import { WebGLRendererDD, type DDRenderParams } from './render/WebGLRendererDD';
+import { ProgressiveMode } from './render/WebGLRenderer';
+import { WebGLRendererDD } from './render/WebGLRendererDD';
 import { InputHandler } from './input/InputHandler';
 import { HUD } from './ui/HUD';
 import { Controls } from './ui/Controls';
@@ -38,7 +38,7 @@ export class MandelbrotViewer {
   private progressiveStage = 0;
   private progressiveMode = ProgressiveMode.FULL;
   private progressiveEnabled = false; // Disabled due to chaos issues
-  private maxProgressiveStages = 2;
+  // private maxProgressiveStages = 2; // Disabled - progressive rendering commented out
   private progressiveCompleted = false;
   
   // Anti-aliasing state
@@ -302,39 +302,9 @@ export class MandelbrotViewer {
 
     const renderStart = performance.now();
     
-    if (this.progressiveEnabled && !this.progressiveCompleted && this.progressiveMode !== ProgressiveMode.FULL) {
-      // Use progressive rendering
-      const progressiveParams: ProgressiveRenderParams = {
-        centerX: this.viewport.centerX,
-        centerY: this.viewport.centerY,
-        scale: this.viewport.scale,
-        maxIterations: Math.max(64, effectiveIterations),
-        width: this.canvas.width,
-        height: this.canvas.height,
-        colorScheme: this.viewport.colorScheme,
-        colorOffset: this.viewport.colorOffset,
-        colorScale: this.viewport.colorScale,
-        progressiveMode: this.progressiveMode,
-        progressiveStage: this.progressiveStage,
-        qualityLevel: this.qualityLevel,
-        previousTransform: this.renderer.getLastTransform() ?? undefined,
-        antiAliasing: this.antiAliasingEnabled,
-        aaQuality: this.aaQuality,
-        histogramEqualization: this.histogramEqualizationEnabled
-      };
-      
-      this.renderer.renderProgressive(progressiveParams);
-      
-      // Advance to next progressive stage, but only for first few frames
-      if (this.progressiveStage < this.maxProgressiveStages) {
-        this.progressiveStage++;
-        console.log(`Progressive stage: ${this.progressiveStage}/${this.maxProgressiveStages}`);
-      } else {
-        // After max stages, mark as completed to prevent further progressive rendering
-        this.progressiveCompleted = true;
-        this.progressiveMode = ProgressiveMode.FULL;
-        console.log('Progressive rendering completed');
-      }
+    // Progressive rendering disabled per review - causes issues with DD debugging
+    if (false && this.progressiveEnabled && !this.progressiveCompleted && this.progressiveMode !== ProgressiveMode.FULL) {
+      // Progressive rendering code commented out - needs renderProgressive method on WebGLRendererDD
     } else {
       // Use traditional full rendering with DD precision support
       this.renderer.render({
@@ -356,6 +326,9 @@ export class MandelbrotViewer {
 
     this.stats.renderTime = performance.now() - renderStart;
 
+    // Get current precision information
+    const precisionInfo = this.renderer.getPrecisionInfo();
+
     this.hud.update({
       centerX: this.viewport.centerX,
       centerY: this.viewport.centerY,
@@ -366,6 +339,7 @@ export class MandelbrotViewer {
       qualityLevel: this.qualityLevel,
       progressiveMode: this.progressiveMode,
       progressiveStage: this.progressiveStage,
+      precision: precisionInfo.currentPrecision === 'dd' ? 'DD' : 'STANDARD',
     });
 
     // Schedule next frame with time budgeting consideration

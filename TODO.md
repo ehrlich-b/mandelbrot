@@ -89,59 +89,78 @@
   - [x] Histogram equalization with power curve approximation
   - [x] Anti-aliasing toggle with quality control
 
-## ✅ **COMPLETED - Deep Zoom Implementation**
-  
-### Deep Zoom Renderer [HIGH] ✅ **LIVE AND WORKING**  
-- [x] **Web Workers Implementation** - ATTEMPTED BUT FAILED
-  - [x] OffscreenCanvas setup for background rendering - BROKE FIREFOX/WEBKIT COMPATIBILITY
-  - [x] Comlink integration for worker communication - CAUSED VISUAL REGRESSIONS
-  - [x] Compute/render separation for better performance - REVERTED DUE TO FAILURES
-  
-- [x] **Deep Zoom Mathematics** ✅ **COMPLETE AND ACTIVE**
-  - [x] Double-double arithmetic implementation (128-bit effective precision)
-  - [x] Complex double-double operations (add, multiply, square, magnitude)
-  - [x] GLSL emulation shaders for GPU double-double arithmetic
-  - [x] Enhanced WebGL renderer with automatic precision switching
-  - [x] Mandelbrot iteration with DD precision for deep zoom
-  - [x] **WebGLRendererDD integrated into MandelbrotViewer** ✅
-  - [x] **Deep zoom bookmarks added (scale < 1e-8)** ✅
-  - [x] **Automatic precision detection and switching** ✅
-  - [ ] Perturbation theory for arbitrary precision (FUTURE - for scale < 1e-14)
-  - [ ] Reference orbit calculation system (FUTURE)
-  
-- [ ] **Documentation & Polish**
-  - [ ] Add shader code documentation
-  - [ ] Performance profiling guide  
-  - [ ] Contributing guidelines
+## 🔁 **Deep Zoom Strategy — Updated, Realistic Plan**
 
-## ⚠️ **CURRENT STATUS: DEEP ZOOM PARTIALLY IMPLEMENTED**
+We will pursue a hybrid approach that delivers reliable deep zoom without chasing dead ends:
 
-**Reality Check**: Deep zoom has fundamental limitations at extreme scales.
+- Above ~5e-6 scale: Standard GPU shader (fast path)
+- ~5e-6 down to ~1e-10 (conservative target): GPU double-double (DD) path using pixel-index based coordinates
+- Beyond ~1e-10: CPU fallback (Web Workers) with arbitrary precision; optional perturbation to accelerate
 
-### ✅ What's Actually Working:
-1. **Shader architecture** - DD renderer switches at correct zoom levels ✅
-2. **WebGLRendererDD integration** - Backend selection works ✅  
-3. **UI controls** - Deep zoom bookmarks functional ✅
-4. **Basic DD math** - Some double-double operations work ✅
+### Why this plan
+- WebGL varyings are single-precision; interpolated UVs can lose significance at extreme scales. We avoid this by computing per-fragment pixel offsets from `gl_FragCoord` and converting to DD before applying scale.
+- DD arithmetic in GLSL remains useful when inputs are well-conditioned (exact pixel indices + DD center/scale).
+- True “infinite” zoom requires arbitrary precision and often perturbation; that belongs on the CPU in workers.
 
-### ❌ What's Broken:
-1. **DD arithmetic precision** - GLSL implementation has quantization bugs
-2. **Extreme zoom rendering** - Scale 1e-6 shows solid color (insufficient precision)
-3. **GPU DD calculations** - Creates blocky "grid squares" instead of smooth gradients
-4. **Float32 fallback** - Even standard precision insufficient at test scale
+### ✅ **COMPLETED DZ‑1 — GPU DD Hardening (target: ~1e-10)** 
+- [x] Shader: generate coordinates from `gl_FragCoord` (avoid interpolated `v_texCoord` for DD path)
+  - [x] Compute integer pixel index from `gl_FragCoord.xy`
+  - [x] Normalize to plane units with resolution/aspect in DD
+  - [x] c = centerDD + scaleDD * pixelOffsetDD
+- [x] Single source of truth for DD GLSL
+  - [x] Inline/include `dd-arithmetic.glsl` only; remove duplicated helpers
+  - [x] Ensure split constant is `4097.0` (single-precision split)
+- [x] Uniforms/precision wiring
+  - [x] Always set `u_center_dd`, `u_scale_dd`, `u_use_dd_precision` when DD active
+  - [x] Keep `highp` where applicable (WebGL2)
+- [x] Observability + tests
+  - [x] HUD/console shows STANDARD ↔ DD switches
+  - [x] Playwright check: zoom past threshold; assert switch + non-flat image
+  - [x] Disable progressive noise during DD validation (progressive disabled)
+- ⚠️ Acceptance (DZ‑1 — Needs Investigation)
+  - [x] Precision switching logic verified working (5e-6 threshold)
+  - [ ] DD rendering produces detailed imagery (tests detect solid color issue)
+  - [ ] Investigate and fix solid color rendering in DD mode
 
-### 🔬 **Debugging Results** (see `deep_zoom_debug.md`):
-- **Issue**: At scale 1e-6, need ~1e-9 precision per pixel
-- **Reality**: Float32 provides ~1e-7 precision
-- **Result**: All pixels get identical coordinates → solid color rendering
-- **DD Solution**: GLSL implementation has precision bugs causing quantization
+### Milestone DZ‑2 — CPU Fallback (target: >1e-10 reliably)
+- [ ] Worker pool + tiling
+  - [ ] Tile scheduler with progressive updates
+  - [ ] Transfer results via `ImageData`/`Uint32Array`
+- [ ] Arbitrary precision math
+  - [ ] Choose library: BigFloat/BigInt (e.g., decimal/big.js to start; later WASM MPFR if needed)
+  - [ ] Deterministic iteration + smooth coloring
+- [ ] Integration
+  - [ ] Auto-switch below GPU DD floor (e.g., 1e-10)
+  - [ ] Show “CPU mode” indicator; keep interaction responsive
+- [ ] Acceptance (DZ‑2)
+  - [ ] Render a canonical deep target (e.g., ~1e-14) within reasonable time on desktop
+  - [ ] Visual parity when switching GPU→CPU at threshold (no jumps)
 
-### 📊 Current Capabilities:
-- **Working zoom range**: Down to ~1e-4 (standard precision)
-- **DD mode activates**: At scale < 5e-6 (but renders solid color)
-- **Architecture**: Sound, just needs precision implementation fixes
+### Milestone DZ‑3 — Perturbation (optional accelerator)
+- [ ] Compute high‑precision reference orbit on CPU
+- [ ] Per-pixel delta orbits in lower precision
+- [ ] Rebase/checkpointing for long zooms
+- [ ] Acceptance: 5–20x speedup over naive CPU at extreme depths
 
-### 🔍 Next Steps:
+### Documentation & Polish
+- [ ] Document shader DD math and coordinate generation strategy
+- [ ] Update troubleshooting with precision limits and mode indicators
+- [ ] Performance profiling notes (GPU vs CPU thresholds)
+
+## ⚠️ **Current Status: Precision Work In Progress**
+
+What works now
+- Precision manager switches to DD below `5e-6`
+- DD shader compiles and runs; GLSL DD arithmetic is available
+- HUD/console hooks exist; need one crisp e2e assertion
+
+What’s changing
+- Coordinate generation for DD will move from interpolated UV to `gl_FragCoord` to avoid interpolation precision loss
+- DD math sources will be unified to a single, correct implementation
+- A CPU fallback will be introduced for arbitrarily deep zoom
+
+Notes
+- WebGL uses single-precision floats. By deriving pixel offsets from `gl_FragCoord` (exact integers up to 2^24) and doing all small‑delta math in DD, we preserve per‑pixel distinction much deeper than with UV interpolation. Arbitrary precision beyond that belongs on CPU.
 
 ## ✅ **COMPLETED - Milestone 1: Advanced Rendering**
 
@@ -175,40 +194,29 @@
   - [ ] Tile invalidation
   - [ ] Zoom pyramid
 
-## 🚀 Milestone 2: Deep Zoom (Week 5-8)
+## 🚀 Milestone 2: Deep Zoom Execution (Weeks 5–8)
 
-### Arbitrary Precision [CRITICAL]
-- [ ] **Double-Double Arithmetic**
-  - [ ] DD number type (128-bit effective)
-  - [ ] Complex DD operations
-  - [ ] GLSL emulation shaders
-  
-- [ ] **Perturbation Theory**
-  - [ ] Reference orbit calculation
-  - [ ] Delta orbit computation
-  - [ ] Rebase detection
-  - [ ] Checkpoint system
-  
-- [ ] **BigNum Integration**
-  - [ ] WASM BigFloat library
-  - [ ] Worker-based computation
-  - [ ] Precision auto-switching
-  
-- [ ] **Series Approximation**
-  - [ ] Taylor series coefficients
-  - [ ] Skip iteration optimization
-  - [ ] Error bounds checking
+### DZ‑1 — GPU DD Hardening
+- [ ] `gl_FragCoord`-based coordinate generation for DD path
+- [ ] Unify DD GLSL to single source; correct split const (4097.0)
+- [ ] Deterministic e2e asserting STANDARD → DD switch and non‑flat image
+- [ ] Acceptance: stable visuals around ~1e-9 to ~1e-10
+
+### DZ‑2 — CPU Fallback (Arbitrary Precision)
+- [ ] Worker pool + tiling; progressive updates
+- [ ] Choose BigFloat/BigInt lib (JS first; swap to WASM if needed)
+- [ ] Auto-switch below DD floor; UI indicator
+- [ ] Acceptance: render ~1e-14 region within reasonable time
+
+### DZ‑3 — Perturbation Accelerator (Optional)
+- [ ] Reference orbit in high precision; per‑pixel delta orbits
+- [ ] Rebase/checkpoint system
+- [ ] Acceptance: 5–20x speedup at extreme depths
 
 ### Deep Zoom UI
-- [ ] **Precision Indicator**
-  - [ ] Current precision display
-  - [ ] Zoom depth meter
-  - [ ] Performance warnings
-  
-- [ ] **Reference Orbit Visualization**
-  - [ ] Debug overlay option
-  - [ ] Rebase point display
-  - [ ] Orbit trajectory
+- [ ] Precision indicator + zoom depth meter
+- [ ] Performance warnings when falling back to CPU
+- [ ] Optional reference‑orbit debug overlay (post DZ‑3)
 
 ## 🎨 Milestone 3: Advanced Features (Week 9-12)
 

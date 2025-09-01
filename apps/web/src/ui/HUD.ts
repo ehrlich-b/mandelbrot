@@ -8,6 +8,7 @@ export interface HUDData {
   qualityLevel?: number;
   progressiveMode?: string;
   progressiveStage?: number;
+  precision?: 'STANDARD' | 'DD';
 }
 
 export class HUD {
@@ -33,6 +34,10 @@ export class HUD {
       ? `<div>Mode: ${data.progressiveMode} (${data.progressiveStage || 0})</div>`
       : '';
 
+    const precisionText = data.precision 
+      ? `<div>Precision: ${data.precision}</div>`
+      : '';
+
     this.element.innerHTML = `
       <div>Center: ${data.centerX.toExponential(6)}, ${data.centerY.toExponential(6)}</div>
       <div>Scale: ${data.scale.toExponential(3)}</div>
@@ -42,6 +47,7 @@ export class HUD {
       <div>Render: ${data.renderTime.toFixed(1)}ms</div>
       ${qualityText}
       ${progressiveText}
+      ${precisionText}
     `;
   }
 
