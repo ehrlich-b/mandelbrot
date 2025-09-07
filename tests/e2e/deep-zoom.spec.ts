@@ -63,14 +63,15 @@ test.describe('Deep Zoom Functionality', () => {
     ];
 
     for (const zoom of problemZooms) {
-      await page.evaluate((scale) => {
-        (window as any).mandelbrot.setViewport({
-          centerX: -0.7533,
-          centerY: 0.1138, 
-          scale: scale,
-          maxIterations: 1500
-        });
-      }, zoom.scale);
+      await page.evaluate((data) => {
+        // Use gotoDeepZoom with string coordinates for proper DD precision
+        (window as any).mandelbrot.gotoDeepZoom(
+          "-0.7533", 
+          "0.1138", 
+          data.scale.toString(),
+          1500
+        );
+      }, zoom);
 
       await page.waitForTimeout(1500);
       

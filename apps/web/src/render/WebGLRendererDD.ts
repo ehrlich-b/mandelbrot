@@ -147,6 +147,8 @@ export class WebGLRendererDD {
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
       const info = gl.getShaderInfoLog(shader);
       const shaderType = type === gl.VERTEX_SHADER ? 'vertex' : 'fragment';
+      console.error(`${shaderType} shader compilation failed:`, info);
+      console.error('Shader source:', source.split('\n').slice(0, 20).join('\n') + '\n...');
       gl.deleteShader(shader);
       throw new Error(`${shaderType} shader compilation failed: ${info}`);
     }
@@ -169,6 +171,7 @@ export class WebGLRendererDD {
 
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       const info = gl.getProgramInfoLog(program);
+      console.error('Shader program linking failed:', info);
       throw new Error(`Shader program linking failed: ${info}`);
     }
 

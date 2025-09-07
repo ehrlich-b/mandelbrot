@@ -38,7 +38,7 @@ uniform bool u_histogramEqualization;
 
 // Double-Double Arithmetic from dd-arithmetic.glsl (unified source)
 const float DD_EPS = 5.96046448e-08;  // 2^-24, single-precision machine epsilon in GLSL
-const float DD_SPLIT = 4097.0;        // 2^12 + 1 for 24-bit mantissa (correct value)
+const float DD_SPLIT = 4097.0;        // 2^12 + 1 for 24-bit mantissa (correct for GLSL single precision)
 
 vec2 dd_fast_two_sum(float a, float b) {
     float s = a + b;
@@ -105,6 +105,14 @@ vec2 dd_sqr(vec2 a) {
     vec2 p = dd_two_product(a.x, a.x);
     float err2 = 2.0 * a.x * a.y;
     return dd_fast_two_sum(p.x, p.y + err2);
+}
+
+vec2 dd_div(vec2 a, vec2 b) {
+    float q1 = a.x / b.x;
+    vec2 prod = dd_mul(dd_from_float(q1), b);
+    vec2 diff = dd_sub(a, prod);
+    float q2 = diff.x / b.x;
+    return dd_fast_two_sum(q1, q2);
 }
 
 float dd_compare(vec2 a, vec2 b) {
@@ -384,18 +392,29 @@ vec4 pixelToComplexDD() {
     // This avoids precision loss from interpolated v_texCoord
     vec2 pixel = gl_FragCoord.xy;
     
-    // Convert to normalized coordinates [-0.5, 0.5] with aspect ratio
-    vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 norm = (pixel / u_resolution - 0.5) * aspectRatio;
+    // CRITICAL FIX: Do ALL coordinate calculation in DD precision from start
+    // Convert pixel coordinates to DD immediately
+    vec2 pixel_x_dd = dd_from_float(pixel.x);
+    vec2 pixel_y_dd = dd_from_float(pixel.y);
     
-    // Convert normalized coordinates to DD for high precision arithmetic
-    vec2 norm_x_dd = dd_from_float(norm.x);
-    vec2 norm_y_dd = dd_from_float(norm.y);
+    // Convert resolution to DD
+    vec2 res_x_dd = dd_from_float(u_resolution.x);
+    vec2 res_y_dd = dd_from_float(u_resolution.y);
+    vec2 half_dd = dd_from_float(0.5);
+    
+    // Normalize to [0,1], then to [-0.5, 0.5] in DD precision
+    vec2 norm_x = dd_sub(dd_div(pixel_x_dd, res_x_dd), half_dd);
+    vec2 norm_y = dd_sub(dd_div(pixel_y_dd, res_y_dd), half_dd);
+    
+    // Apply aspect ratio correction in DD precision
+    vec2 aspect_ratio_dd = dd_div(res_x_dd, res_y_dd);
+    vec2 norm_x_corrected = dd_mul(norm_x, aspect_ratio_dd);
+    // Y doesn't need aspect correction (stays as norm_y)
     
     // Multiply by scale using DD arithmetic to preserve precision
     // This is critical: scale might be 1e-9, so pixel-level precision matters
-    vec2 offset_x = dd_mul(norm_x_dd, u_scale_dd);  
-    vec2 offset_y = dd_mul(norm_y_dd, u_scale_dd);
+    vec2 offset_x = dd_mul(norm_x_corrected, u_scale_dd);  
+    vec2 offset_y = dd_mul(norm_y, u_scale_dd);
     
     // Add offsets to center using DD addition
     vec2 re = dd_add(u_center_dd.xy, offset_x);
@@ -428,11 +447,5 @@ void main() {
     // Apply coloring
     vec3 color = getColor(mu, u_colorScheme);
     
-    // Add DD mode visual indicator for debugging
-    if (u_use_dd_precision) {
-        // Subtle blue tint to confirm DD mode active
-        fragColor = vec4(color * 0.9 + vec3(0.0, 0.0, 0.1), 1.0);
-    } else {
-        fragColor = vec4(color, 1.0);
-    }
+    fragColor = vec4(color, 1.0);
 }
