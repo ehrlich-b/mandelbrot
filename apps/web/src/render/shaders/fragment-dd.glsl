@@ -36,6 +36,52 @@ uniform float u_aaQuality;
 // Histogram equalization uniforms
 uniform bool u_histogramEqualization;
 
+// Progressive rendering helper functions
+float random(vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
+float noise(vec2 st) {
+    vec2 i = floor(st);
+    vec2 f = fract(st);
+    vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(random(i + vec2(0.0,0.0)),
+                   random(i + vec2(1.0,0.0)), u.x),
+               mix(random(i + vec2(0.0,1.0)),
+                   random(i + vec2(1.0,1.0)), u.x), u.y);
+}
+
+float blueNoise(vec2 coord) {
+    vec2 st = coord * u_resolution * 0.01;
+    float n = 0.0;
+    float amplitude = 1.0;
+    for (int i = 0; i < 4; i++) {
+        n += noise(st) * amplitude;
+        st *= 2.0;
+        amplitude *= 0.5;
+    }
+    float highFreqComponent = noise(coord * u_resolution * 0.1);
+    return mix(n, highFreqComponent, 0.7);
+}
+
+bool shouldSampleStochastic(vec2 coord, int stage) {
+    float blueNoiseValue = blueNoise(coord);
+    float threshold = 0.5;
+    if (stage == 0) threshold = 0.25;
+    else if (stage == 1) threshold = 0.5;
+    else if (stage == 2) threshold = 0.75;
+    else threshold = 1.0;
+    return blueNoiseValue < threshold;
+}
+
+bool shouldSampleInterleaved(vec2 coord, int stage) {
+    ivec2 pixel = ivec2(coord * u_resolution);
+    if (stage == 0) return pixel.y % 4 == 0;
+    else if (stage == 1) return (pixel.y % 4 == 0) || (pixel.y % 4 == 2);
+    else if (stage == 2) return (pixel.y % 4 != 3);
+    else return true;
+}
+
 // Double-Double Arithmetic from dd-arithmetic.glsl (unified source)
 const float DD_EPS = 5.96046448e-08;  // 2^-24, single-precision machine epsilon in GLSL
 const float DD_SPLIT = 4097.0;        // 2^12 + 1 for 24-bit mantissa (correct for GLSL single precision)
@@ -424,8 +470,29 @@ vec4 pixelToComplexDD() {
 }
 
 void main() {
+    // Progressive rendering: check if we should compute this pixel
+    if (u_progressiveMode > 0 && u_progressiveMode != 1) { // Skip reprojection (mode 1) - not implemented for DD
+        bool shouldCompute = true;
+
+        if (u_progressiveMode == 2) { // Stochastic sampling
+            shouldCompute = shouldSampleStochastic(v_texCoord, u_progressiveStage);
+        } else if (u_progressiveMode == 3) { // Interleaved sampling
+            shouldCompute = shouldSampleInterleaved(v_texCoord, u_progressiveStage);
+        }
+
+        if (!shouldCompute) {
+            // For pixels we're not computing, use previous frame if available, else black
+            if (u_progressiveStage > 0) {
+                fragColor = texture(u_previousTexture, v_texCoord);
+            } else {
+                fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            }
+            return;
+        }
+    }
+
     float mu;
-    
+
     if (u_use_dd_precision) {
         // Use double-double precision for deep zoom with gl_FragCoord-based coordinates
         vec4 c_dd = pixelToComplexDD();
@@ -437,15 +504,15 @@ void main() {
         vec2 c = u_center + uv * u_scale;
         mu = mandelbrot(c);
     }
-    
+
     // Handle interior points
     if (mu < 0.0) {
         fragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
-    
+
     // Apply coloring
     vec3 color = getColor(mu, u_colorScheme);
-    
+
     fragColor = vec4(color, 1.0);
 }

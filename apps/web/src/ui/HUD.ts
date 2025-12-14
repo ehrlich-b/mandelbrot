@@ -8,7 +8,7 @@ export interface HUDData {
   qualityLevel?: number;
   progressiveMode?: string;
   progressiveStage?: number;
-  precision?: 'STANDARD' | 'DD';
+  precision?: 'STANDARD' | 'DD' | 'TILED';
 }
 
 export class HUD {

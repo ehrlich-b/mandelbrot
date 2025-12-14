@@ -1,9 +1,12 @@
 import { ProgressiveMode } from './render/WebGLRenderer';
 import { WebGLRendererDD } from './render/WebGLRendererDD';
+import { TileRenderer } from './tiles';
 import { InputHandler } from './input/InputHandler';
 import { HUD } from './ui/HUD';
 import { Controls } from './ui/Controls';
 import { store, type ViewportState } from './state/store';
+
+export type RenderMode = 'fullframe' | 'tiled';
 
 export interface RenderStats {
   fps: number;
@@ -14,11 +17,13 @@ export interface RenderStats {
 export class MandelbrotViewer {
   private canvas: HTMLCanvasElement;
   private renderer: WebGLRendererDD;
+  private tileRenderer: TileRenderer | null = null;
   private inputHandler: InputHandler;
   private hud: HUD;
   private controls: Controls;
-  
+
   private viewport: ViewportState;
+  private renderMode: RenderMode = 'fullframe';
 
   private stats: RenderStats = {
     fps: 0,
@@ -37,12 +42,12 @@ export class MandelbrotViewer {
   // Progressive rendering state
   private progressiveStage = 0;
   private progressiveMode = ProgressiveMode.FULL;
-  private progressiveEnabled = false; // Disabled due to chaos issues
-  // private maxProgressiveStages = 2; // Disabled - progressive rendering commented out
+  private progressiveEnabled = false; // Disabled by default - adds complexity for marginal benefit
+  private maxProgressiveStages = 3;
   private progressiveCompleted = false;
   
-  // Anti-aliasing state
-  private antiAliasingEnabled = true;
+  // Anti-aliasing state - disabled by default for performance
+  private antiAliasingEnabled = false;
   private aaQuality = 2.0;
   
   // Histogram equalization state
@@ -65,17 +70,17 @@ export class MandelbrotViewer {
     // Load saved state
     store.loadState();
     this.viewport = store.getViewport();
-    
+
     this.resize();
     await this.renderer.init(this.canvas);
     this.hud.init();
     this.controls.init();
-    
+
     this.renderer.setRenderCallback((stats) => {
       this.stats.renderTime = stats.renderTime;
       this.stats.fps = stats.fps;
     });
-    
+
     // Subscribe to store changes
     store.subscribe((viewport) => {
       // Reset progressive rendering when viewport changes significantly
@@ -84,11 +89,15 @@ export class MandelbrotViewer {
                            Math.abs(viewport.centerY - prevViewport.centerY) > 1e-12;
       const scaleChanged = Math.abs(viewport.scale - prevViewport.scale) > 1e-12;
       const iterationsChanged = viewport.maxIterations !== prevViewport.maxIterations;
-      
+
       if (centerChanged || scaleChanged || iterationsChanged) {
         this.resetProgressiveRendering();
+        // Cancel pending tiles on viewport change for responsiveness
+        if (this.renderMode === 'tiled' && this.tileRenderer) {
+          this.tileRenderer.cancelPending();
+        }
       }
-      
+
       this.viewport = viewport;
     });
 
@@ -99,6 +108,37 @@ export class MandelbrotViewer {
         this.resize();
       }, 100);
     });
+  }
+
+  /**
+   * Set the render mode (fullframe or tiled)
+   */
+  async setRenderMode(mode: RenderMode): Promise<void> {
+    if (mode === this.renderMode) return;
+
+    this.renderMode = mode;
+    console.log(`Render mode: ${mode}`);
+
+    if (mode === 'tiled' && !this.tileRenderer) {
+      // Initialize tile renderer on first use
+      this.tileRenderer = new TileRenderer();
+      await this.tileRenderer.init(this.canvas);
+
+      // Request re-render when tiles complete
+      this.tileRenderer.onTileReady(() => {
+        // Trigger a re-render on next frame
+        if (this.isRunning && this.renderMode === 'tiled') {
+          // The render loop will pick up new tiles
+        }
+      });
+    }
+  }
+
+  /**
+   * Get the current render mode
+   */
+  getRenderMode(): RenderMode {
+    return this.renderMode;
   }
 
   private setupEventHandlers(): void {
@@ -301,12 +341,30 @@ export class MandelbrotViewer {
     this.updateProgressiveMode(currentFrameTime);
 
     const renderStart = performance.now();
-    
-    // Progressive rendering disabled per review - causes issues with DD debugging
-    if (false && this.progressiveEnabled && !this.progressiveCompleted && this.progressiveMode !== ProgressiveMode.FULL) {
-      // Progressive rendering code commented out - needs renderProgressive method on WebGLRendererDD
+
+    let precisionMode: 'STANDARD' | 'DD' | 'TILED' = 'STANDARD';
+
+    if (this.renderMode === 'tiled' && this.tileRenderer) {
+      // Tile-based rendering
+      this.tileRenderer.render({
+        centerX: this.viewport.centerX,
+        centerY: this.viewport.centerY,
+        scale: this.viewport.scale,
+        maxIterations: Math.max(64, effectiveIterations),
+        width: this.canvas.width,
+        height: this.canvas.height,
+        colorScheme: this.viewport.colorScheme,
+        colorOffset: this.viewport.colorOffset,
+        colorScale: this.viewport.colorScale,
+      });
+      precisionMode = 'TILED';
     } else {
-      // Use traditional full rendering with DD precision support
+      // Full-frame rendering (original)
+      // Progressive rendering now works in both standard and DD modes
+      // (DD shader implements stochastic and interleaved modes, but not reprojection)
+      const canUseProgressive = this.progressiveEnabled;
+
+      // Render with progressive mode in standard precision, full render in DD mode
       this.renderer.render({
         centerX: this.viewport.centerX,
         centerY: this.viewport.centerY,
@@ -320,14 +378,27 @@ export class MandelbrotViewer {
         antiAliasing: this.antiAliasingEnabled,
         aaQuality: this.aaQuality,
         histogramEqualization: this.histogramEqualizationEnabled,
-        useAutoPrecision: true, // Enable automatic precision switching
+        useAutoPrecision: true,
+        // Pass progressive mode info - renderer will use it for standard shader
+        progressiveMode: canUseProgressive && !this.progressiveCompleted ? this.progressiveMode : ProgressiveMode.FULL,
+        progressiveStage: this.progressiveStage,
       });
+
+      // Advance progressive stage if in progressive mode
+      if (canUseProgressive && !this.progressiveCompleted) {
+        this.progressiveStage++;
+        if (this.progressiveStage >= this.maxProgressiveStages) {
+          this.progressiveCompleted = true;
+          this.progressiveMode = ProgressiveMode.FULL;
+        }
+      }
+
+      // Get current precision information
+      const precisionInfo = this.renderer.getPrecisionInfo();
+      precisionMode = precisionInfo.currentPrecision === 'dd' ? 'DD' : 'STANDARD';
     }
 
     this.stats.renderTime = performance.now() - renderStart;
-
-    // Get current precision information
-    const precisionInfo = this.renderer.getPrecisionInfo();
 
     this.hud.update({
       centerX: this.viewport.centerX,
@@ -339,7 +410,7 @@ export class MandelbrotViewer {
       qualityLevel: this.qualityLevel,
       progressiveMode: this.progressiveMode,
       progressiveStage: this.progressiveStage,
-      precision: precisionInfo.currentPrecision === 'dd' ? 'DD' : 'STANDARD',
+      precision: precisionMode,
     });
 
     // Schedule next frame with time budgeting consideration
@@ -424,6 +495,7 @@ export class MandelbrotViewer {
   dispose(): void {
     this.stop();
     this.renderer.dispose();
+    this.tileRenderer?.dispose();
     this.inputHandler.dispose();
     this.hud.dispose();
     this.controls.dispose();

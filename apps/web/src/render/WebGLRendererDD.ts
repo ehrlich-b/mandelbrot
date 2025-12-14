@@ -8,23 +8,27 @@
 import vertexShaderSource from './shaders/vertex.glsl';
 import fragmentShaderSource from './shaders/fragment.glsl';
 import fragmentShaderDDSource from './shaders/fragment-dd.glsl';
-import { 
-  DoubleDouble, 
-  ddFromNumber, 
-  ddToNumber, 
+import {
+  DoubleDouble,
+  ddFromNumber,
+  ddToNumber,
   ddFromString
 } from '../math/dd.js';
-import { RenderParams } from './WebGLRenderer.js';
+import { RenderParams, ProgressiveMode } from './WebGLRenderer.js';
 
 export interface DDRenderParams extends RenderParams {
   // Enhanced precision coordinates
   centerXDD?: DoubleDouble;
   centerYDD?: DoubleDouble;
   scaleDD?: DoubleDouble;
-  
+
   // Automatic precision switching
   useAutoPrecision?: boolean;
   precisionThreshold?: number;  // Scale below which to use DD arithmetic
+
+  // Progressive rendering (only used in standard mode)
+  progressiveMode?: ProgressiveMode;
+  progressiveStage?: number;
 }
 
 /**
@@ -277,7 +281,7 @@ export class WebGLRendererDD {
     gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
   }
 
-  private setStandardUniforms(params: DDRenderParams, uniforms: Record<string, WebGLUniformLocation | null>): void {
+  private setStandardUniforms(params: DDRenderParams, uniforms: Record<string, WebGLUniformLocation | null>, isUsingDD: boolean): void {
     const gl = this.gl!;
 
     if (uniforms.u_resolution) {
@@ -309,6 +313,40 @@ export class WebGLRendererDD {
     }
     if (uniforms.u_histogramEqualization) {
       gl.uniform1i(uniforms.u_histogramEqualization, params.histogramEqualization ? 1 : 0);
+    }
+
+    // Progressive rendering uniforms - now work in both standard and DD modes
+    // (DD shader supports stochastic and interleaved, but not reprojection)
+    if (uniforms.u_progressiveMode) {
+      const modeMap: Record<string, number> = {
+        'full': 0,
+        'reprojection': 1,  // Note: reprojection not implemented in DD shader
+        'stochastic': 2,
+        'interleaved': 3,
+        'adaptive': 4
+      };
+      // If using DD and reprojection requested, fall back to stochastic
+      let mode = modeMap[params.progressiveMode || 'full'] || 0;
+      if (isUsingDD && mode === 1) {
+        mode = 2; // Fall back to stochastic for DD mode
+      }
+      gl.uniform1i(uniforms.u_progressiveMode, mode);
+    }
+    if (uniforms.u_progressiveStage) {
+      gl.uniform1i(uniforms.u_progressiveStage, params.progressiveStage || 0);
+    }
+    // Previous transform for reprojection
+    if (uniforms.u_previousTransform && this.lastTransform) {
+      gl.uniform3f(uniforms.u_previousTransform,
+        this.lastTransform.centerX,
+        this.lastTransform.centerY,
+        this.lastTransform.scale);
+    }
+    // Bind previous frame texture for progressive rendering
+    if (uniforms.u_previousTexture && this.previousFrameTexture) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.previousFrameTexture);
+      gl.uniform1i(uniforms.u_previousTexture, 1);
     }
   }
 
@@ -366,9 +404,9 @@ export class WebGLRendererDD {
     // Setup vertex attributes
     this.setupVertexAttributes(program);
 
-    // Set standard uniforms
-    this.setStandardUniforms(params, uniforms);
-    
+    // Set standard uniforms (pass needsDD so progressive is disabled in DD mode)
+    this.setStandardUniforms(params, uniforms, needsDD);
+
     // Set DD-specific uniforms if using DD program
     if (needsDD) {
       this.setDDUniforms(params, uniforms);
@@ -376,6 +414,12 @@ export class WebGLRendererDD {
 
     // Draw the full-screen quad
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Save frame for progressive rendering (for next frame's u_previousTexture)
+    const progressiveMode = params.progressiveMode || 'full';
+    if (progressiveMode !== 'full') {
+      this.saveFrameTexture();
+    }
 
     // Update transform state
     this.lastTransform = {
@@ -446,6 +490,24 @@ export class WebGLRendererDD {
       effectiveDigits: needsHighPrecision ? 32 : 15,
       scale
     };
+  }
+
+  private saveFrameTexture(): void {
+    if (!this.gl || !this.previousFrameTexture || !this.canvas) return;
+
+    const gl = this.gl;
+
+    // Read pixels from current framebuffer
+    const pixels = new Uint8Array(this.canvas.width * this.canvas.height * 4);
+    gl.readPixels(0, 0, this.canvas.width, this.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+    // Update texture with pixel data
+    gl.bindTexture(gl.TEXTURE_2D, this.previousFrameTexture);
+    gl.texImage2D(
+      gl.TEXTURE_2D, 0, gl.RGBA,
+      this.canvas.width, this.canvas.height, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, pixels
+    );
   }
 
   getLastTransform(): { centerX: number; centerY: number; scale: number } | null {
