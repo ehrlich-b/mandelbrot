@@ -11,6 +11,7 @@ import fragmentShaderDDSource from './shaders/fragment-dd.glsl';
 import {
   DoubleDouble,
   ddFromNumber,
+  ddFromNumberForGLSL,
   ddToNumber,
   ddFromString
 } from '../math/dd.js';
@@ -29,6 +30,10 @@ export interface DDRenderParams extends RenderParams {
   // Progressive rendering (only used in standard mode)
   progressiveMode?: ProgressiveMode;
   progressiveStage?: number;
+
+  // Debug mode for DD shader diagnostics
+  // 0=normal, 1=show pixel coords, 2=show DD coords, 3=show scale, 4=show iteration growth
+  debugMode?: number;
 }
 
 /**
@@ -46,19 +51,19 @@ export class PrecisionManager {
   }
   
   /**
-   * Convert regular numbers to DD with error checking
+   * Convert regular numbers to DD for GLSL shaders.
+   *
+   * CRITICAL FIX: Uses ddFromNumberForGLSL to properly split float64 into
+   * two float32 components. Without this, we only get float32 precision
+   * because GLSL uniforms are 32-bit floats.
    */
   static numberToDD(x: number): DoubleDouble {
     if (!isFinite(x)) {
       return ddFromNumber(x);
     }
-    
-    // For very small or very large numbers, preserve precision
-    if (Math.abs(x) < 1e-300 || Math.abs(x) > 1e300) {
-      return ddFromNumber(x);
-    }
-    
-    return ddFromNumber(x);
+
+    // Use GLSL-specific conversion that properly splits float64 → 2x float32
+    return ddFromNumberForGLSL(x);
   }
   
   /**
@@ -214,10 +219,10 @@ export class WebGLRendererDD {
 
   private setupUniformsForProgram(program: WebGLProgram): Record<string, WebGLUniformLocation | null> {
     const gl = this.gl!;
-    
+
     const uniformNames = [
       'u_resolution',
-      'u_center', 
+      'u_center',
       'u_scale',
       'u_center_dd',    // DD precision center (vec4)
       'u_scale_dd',     // DD precision scale (vec2)
@@ -233,6 +238,7 @@ export class WebGLRendererDD {
       'u_antiAliasing',
       'u_aaQuality',
       'u_histogramEqualization',
+      'u_debug_mode',   // Debug mode for DD shader diagnostics
     ];
 
     const uniforms: Record<string, WebGLUniformLocation | null> = {};
@@ -358,18 +364,35 @@ export class WebGLRendererDD {
       const centerXDD = params.centerXDD || PrecisionManager.numberToDD(params.centerX);
       const centerYDD = params.centerYDD || PrecisionManager.numberToDD(params.centerY);
       gl.uniform4f(uniforms.u_center_dd, centerXDD.hi, centerXDD.lo, centerYDD.hi, centerYDD.lo);
+    } else {
+      console.warn('DD: u_center_dd uniform not found');
     }
-    
+
     if (uniforms.u_scale_dd) {
       // PRECISION FIX: Convert scale to proper DD representation
       const scaleDD = params.scaleDD || PrecisionManager.numberToDD(params.scale);
       gl.uniform2f(uniforms.u_scale_dd, scaleDD.hi, scaleDD.lo);
+    } else {
+      console.warn('DD: u_scale_dd uniform not found');
     }
-    
+
     if (uniforms.u_use_dd_precision) {
-      const useDD = params.useAutoPrecision !== false && 
+      const useDD = params.useAutoPrecision !== false &&
                    PrecisionManager.needsHighPrecision(params.scale);
       gl.uniform1i(uniforms.u_use_dd_precision, useDD ? 1 : 0);
+    } else {
+      console.warn('DD: u_use_dd_precision uniform not found');
+    }
+
+    // Debug mode for DD shader diagnostics
+    if (uniforms.u_debug_mode !== null && uniforms.u_debug_mode !== undefined) {
+      const debugMode = params.debugMode || 0;
+      gl.uniform1i(uniforms.u_debug_mode, debugMode);
+      if (debugMode !== 0) {
+        console.log(`DD: Setting debug mode to ${debugMode}`);
+      }
+    } else {
+      console.warn('DD: u_debug_mode uniform not found in shader');
     }
   }
 
@@ -414,6 +437,20 @@ export class WebGLRendererDD {
 
     // Draw the full-screen quad
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Check for GL errors (only log if there's an error)
+    const glError = gl.getError();
+    if (glError !== gl.NO_ERROR) {
+      const errorMap: Record<number, string> = {
+        [gl.INVALID_ENUM]: 'INVALID_ENUM',
+        [gl.INVALID_VALUE]: 'INVALID_VALUE',
+        [gl.INVALID_OPERATION]: 'INVALID_OPERATION',
+        [gl.INVALID_FRAMEBUFFER_OPERATION]: 'INVALID_FRAMEBUFFER_OPERATION',
+        [gl.OUT_OF_MEMORY]: 'OUT_OF_MEMORY',
+        [gl.CONTEXT_LOST_WEBGL]: 'CONTEXT_LOST_WEBGL',
+      };
+      console.error(`WebGL Error after draw: ${errorMap[glError] || glError}`);
+    }
 
     // Save frame for progressive rendering (for next frame's u_previousTexture)
     const progressiveMode = params.progressiveMode || 'full';

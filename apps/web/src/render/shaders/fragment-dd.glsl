@@ -87,15 +87,23 @@ const float DD_EPS = 5.96046448e-08;  // 2^-24, single-precision machine epsilon
 const float DD_SPLIT = 4097.0;        // 2^12 + 1 for 24-bit mantissa (correct for GLSL single precision)
 
 vec2 dd_fast_two_sum(float a, float b) {
+    // Fast Two-Sum (Dekker): REQUIRES |a| >= |b|
+    // Break into separate statements to prevent GLSL compiler optimization
     float s = a + b;
-    float e = b - (s - a);
+    float b_virtual = s - a;      // Virtual b that was actually added
+    float e = b - b_virtual;      // Error = difference from actual b
     return vec2(s, e);
 }
 
 vec2 dd_two_sum(float a, float b) {
+    // Knuth Two-Sum algorithm
+    // Break into separate statements to prevent GLSL compiler optimization
     float s = a + b;
     float v = s - a;
-    float e = (a - (s - v)) + (b - v);
+    float a_prime = s - v;        // Reconstruct 'a' from s and v
+    float b_prime = b - v;        // Error in 'b'
+    float err_a = a - a_prime;    // Error in 'a'
+    float e = err_a + b_prime;    // Total error
     return vec2(s, e);
 }
 
@@ -131,10 +139,18 @@ float dd_to_float(vec2 dd) {
 }
 
 vec2 dd_add(vec2 a, vec2 b) {
+    // Robust DD addition (Joldes et al./Shewchuk algorithm)
+    // Avoids the |a| >= |b| invariant violation in dd_normalize
     vec2 s = dd_two_sum(a.x, b.x);
-    vec2 f = dd_two_sum(a.y, b.y);
-    vec2 c = dd_normalize(vec2(s.y + f.x, f.y));
-    return dd_fast_two_sum(s.x, c.x + c.y);
+    vec2 t = dd_two_sum(a.y, b.y);
+
+    s.y += t.x;                      // Add High-Low to Low-High
+    s = dd_fast_two_sum(s.x, s.y);   // Renormalize High
+
+    s.y += t.y;                      // Add Low-Low
+    s = dd_fast_two_sum(s.x, s.y);   // Renormalize High again
+
+    return s;
 }
 
 vec2 dd_sub(vec2 a, vec2 b) {
@@ -469,7 +485,29 @@ vec4 pixelToComplexDD() {
     return vec4(re.x, re.y, im.x, im.y);
 }
 
+// Debug mode: 0=normal, 1=show coordinates, 2=show scale magnitude, 3=show iteration progress
+uniform int u_debug_mode;
+
 void main() {
+    // DEBUG MODE 6: VERIFY SHADER UPDATES - distinctive magenta
+    if (u_debug_mode == 6) {
+        fragColor = vec4(1.0, 0.0, 1.0, 1.0);  // MAGENTA - confirms shader reload
+        return;
+    }
+
+    // DEBUG MODE 5: Solid blue - verify shader is running (BEFORE progressive check)
+    if (u_debug_mode == 5) {
+        fragColor = vec4(0.0, 0.0, 1.0, 1.0);  // SOLID BLUE
+        return;
+    }
+
+    // DEBUG MODE 7: Show progressive mode value as color
+    if (u_debug_mode == 7) {
+        float progVal = float(u_progressiveMode) / 5.0;  // Normalize to [0,1] range
+        fragColor = vec4(progVal, 0.5, 0.5, 1.0);  // Red channel = progressive mode
+        return;
+    }
+
     // Progressive rendering: check if we should compute this pixel
     if (u_progressiveMode > 0 && u_progressiveMode != 1) { // Skip reprojection (mode 1) - not implemented for DD
         bool shouldCompute = true;
@@ -494,9 +532,325 @@ void main() {
     float mu;
 
     if (u_use_dd_precision) {
+        // DEBUG MODE 1: Pure red - verify DD path is taken
+        if (u_debug_mode == 1) {
+            fragColor = vec4(1.0, 0.0, 0.0, 1.0);  // SOLID RED
+            return;
+        }
+
         // Use double-double precision for deep zoom with gl_FragCoord-based coordinates
         vec4 c_dd = pixelToComplexDD();
-        mu = mandelbrotDD(c_dd);
+
+        // DEBUG MODE 2: Show c_dd coordinates as colors (detect if all same)
+        if (u_debug_mode == 2) {
+            // Map c_dd to visible range - shift by center and scale
+            float re_offset = dd_to_float(dd_sub(c_dd.xy, u_center_dd.xy));
+            float im_offset = dd_to_float(dd_sub(c_dd.zw, u_center_dd.zw));
+            // Normalize: at scale 1e-7, max offset is ~1e-7, so scale up
+            float norm = 1.0 / (u_scale_dd.x + 1e-30);
+            fragColor = vec4(
+                re_offset * norm + 0.5,
+                im_offset * norm + 0.5,
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 3: Show scale value as color
+        if (u_debug_mode == 3) {
+            float scale_log = -log(max(u_scale_dd.x, 1e-30)) / 30.0;
+            fragColor = vec4(scale_log, 0.5, 0.5, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 4: Show iteration count as color (before escape check)
+        // FIXED: Use same escape radius as mandelbrotDD (16.0) and more iterations
+        if (u_debug_mode == 4) {
+            vec4 z = COMPLEX_DD_ZERO;
+            vec2 escapeRadius2 = dd_from_float(16.0);  // |z|² > 16 means |z| > 4
+            int count = 0;
+            for (int i = 0; i < 1000; i++) {  // Increased from 100
+                if (i >= u_maxIterations) break;
+                vec2 r2 = complex_dd_magnitude_squared(z);
+                if (dd_compare(r2, escapeRadius2) > 0.0) break;  // Use DD compare
+                z = complex_dd_add(complex_dd_sqr(z), c_dd);
+                count++;
+            }
+            float t = float(count) / float(u_maxIterations);
+            fragColor = vec4(t, 1.0 - t, 0.0, 1.0);  // Red = few iterations, Green = many
+            return;
+        }
+
+        // DEBUG MODE 10: Show |z|² after first iteration (should be |c|²)
+        if (u_debug_mode == 10) {
+            // After first iteration: z = c
+            vec4 z = c_dd;
+            vec2 r2 = complex_dd_magnitude_squared(z);
+            float r2_float = dd_to_float(r2);
+            // At center (-0.745, 0.113): |c|² ≈ 0.568
+            // Should show gradient across the viewport
+            // Normalize to [0, 1] assuming max |c|² around 1
+            float t = clamp(r2_float, 0.0, 1.0);
+            fragColor = vec4(t, t, 0.0, 1.0);  // Yellow intensity = |c|²
+            return;
+        }
+
+        // DEBUG MODE 11: Show raw c_dd.x (real hi part) as color
+        if (u_debug_mode == 11) {
+            // c_dd.x is the hi part of real coordinate
+            // Should be around -0.745 for all pixels at this zoom
+            // Map [-1, 0] to [0, 1] for visualization
+            float t = (c_dd.x + 1.0);  // Maps -1 to 0, 0 to 1
+            fragColor = vec4(t, 0.0, 1.0 - t, 1.0);  // Red-blue gradient
+            return;
+        }
+
+        // DEBUG MODE 12: Show c_dd.y (real lo part) variation
+        if (u_debug_mode == 12) {
+            // c_dd.y is the lo part - should show variation at deep zoom
+            // At scale 1e-6, this should vary by about ±1e-6 across the screen
+            // Scale up to make visible
+            float lo_scaled = c_dd.y * 1e6 + 0.5;  // Scale and center
+            fragColor = vec4(clamp(lo_scaled, 0.0, 1.0), 0.5, 0.5, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 13: Test DD arithmetic - compute known value
+        // Compute (0.5 + 0.5)^2 = 1.0 using DD arithmetic
+        if (u_debug_mode == 13) {
+            vec2 half_val = dd_from_float(0.5);
+            vec2 one = dd_add(half_val, half_val);  // Should be 1.0
+            vec2 one_squared = dd_sqr(one);  // Should be 1.0
+            float result = dd_to_float(one_squared);
+            // Show result as color: green if ~1.0, red if wrong
+            fragColor = vec4(abs(result - 1.0) * 10.0, result, 0.0, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 14: Test complex_dd_sqr with known value
+        // (1 + 0i)^2 = 1 + 0i
+        if (u_debug_mode == 14) {
+            vec4 z = vec4(1.0, 0.0, 0.0, 0.0);  // 1 + 0i in DD
+            vec4 z2 = complex_dd_sqr(z);
+            float re = dd_to_float(z2.xy);
+            float im = dd_to_float(z2.zw);
+            // re should be 1.0, im should be 0.0
+            fragColor = vec4(abs(re - 1.0) * 10.0, re, abs(im) * 10.0, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 15: Run ONE iteration and show z
+        if (u_debug_mode == 15) {
+            vec4 z = COMPLEX_DD_ZERO;
+            // z = z^2 + c = 0 + c = c
+            z = complex_dd_add(complex_dd_sqr(z), c_dd);
+            float re = dd_to_float(z.xy);
+            float im = dd_to_float(z.zw);
+            // At center (-0.745, 0.113), z should be close to c
+            // Map to visible range
+            fragColor = vec4((re + 1.0) / 2.0, (im + 0.5) / 1.0, 0.5, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 16: Show the LO part of c_dd.xy directly
+        // This should show variation if DD coords are working
+        if (u_debug_mode == 16) {
+            // c_dd.y is the lo part of real coordinate
+            // At scale 1e-6, the range of lo values should be about ±1e-6
+            // Scale to make visible: multiply by 1e6 gives ±1, then add 0.5
+            float lo_re = c_dd.y;
+            float lo_scaled = lo_re * 1000000.0 + 0.5;
+            fragColor = vec4(clamp(lo_scaled, 0.0, 1.0), 0.5, 0.5, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 17: Compare center pixel to this pixel using bit manipulation
+        // Show the difference in floating point representation
+        if (u_debug_mode == 17) {
+            // Compute the difference from center in DD
+            vec2 diff_re = dd_sub(c_dd.xy, u_center_dd.xy);
+            vec2 diff_im = dd_sub(c_dd.zw, u_center_dd.zw);
+            // The difference should be small but non-zero
+            // Scale by 1/scale to normalize
+            float diff_re_normalized = dd_to_float(diff_re) / u_scale_dd.x;
+            float diff_im_normalized = dd_to_float(diff_im) / u_scale_dd.x;
+            // Map [-1, 1] to [0, 1]
+            fragColor = vec4(
+                diff_re_normalized + 0.5,
+                diff_im_normalized + 0.5,
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 18: Show 5 iterations of DD to see if orbit diverges
+        if (u_debug_mode == 18) {
+            vec4 z = COMPLEX_DD_ZERO;
+            for (int i = 0; i < 5; i++) {
+                z = complex_dd_add(complex_dd_sqr(z), c_dd);
+            }
+            vec2 r2 = complex_dd_magnitude_squared(z);
+            float mag = sqrt(dd_to_float(r2));
+            // After 5 iterations, magnitude could be anywhere from 0 to huge
+            // Use log scale for visualization
+            float t = log(mag + 1.0) / 5.0;
+            fragColor = vec4(clamp(t, 0.0, 1.0), clamp(1.0 - t, 0.0, 1.0), 0.0, 1.0);
+            return;
+        }
+
+        // DEBUG MODE 19: Test after first iteration: z = c, then show z² offset from c²_center
+        if (u_debug_mode == 19) {
+            // First iteration: z = 0² + c = c
+            vec4 z1 = c_dd;
+            // Second iteration: z = c² + c
+            vec4 c_squared = complex_dd_sqr(z1);
+            vec4 z2 = complex_dd_add(c_squared, c_dd);
+
+            // Compute what c² at center would be
+            vec4 center = vec4(u_center_dd.xy, u_center_dd.zw);
+            vec4 center_squared = complex_dd_sqr(center);
+
+            // Show the difference in c² between this pixel and center
+            vec2 diff_re = dd_sub(c_squared.xy, center_squared.xy);
+            vec2 diff_im = dd_sub(c_squared.zw, center_squared.zw);
+
+            // Normalize and display - at scale 1e-6, expect ±1e-6 * 2 * center ≈ ±1.5e-6
+            float diff_re_norm = dd_to_float(diff_re) * 1e6 + 0.5;
+            float diff_im_norm = dd_to_float(diff_im) * 1e6 + 0.5;
+
+            fragColor = vec4(
+                clamp(diff_re_norm, 0.0, 1.0),
+                clamp(diff_im_norm, 0.0, 1.0),
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 20: Show difference in z after 2 iterations vs center's z
+        if (u_debug_mode == 20) {
+            // Compute z after 2 iterations for this pixel
+            vec4 z = COMPLEX_DD_ZERO;
+            z = complex_dd_add(complex_dd_sqr(z), c_dd);  // z = c
+            z = complex_dd_add(complex_dd_sqr(z), c_dd);  // z = c² + c
+
+            // Compute z after 2 iterations for center
+            vec4 center = vec4(u_center_dd.xy, u_center_dd.zw);
+            vec4 z_center = COMPLEX_DD_ZERO;
+            z_center = complex_dd_add(complex_dd_sqr(z_center), center);
+            z_center = complex_dd_add(complex_dd_sqr(z_center), center);
+
+            // Show the difference
+            vec2 diff_re = dd_sub(z.xy, z_center.xy);
+            vec2 diff_im = dd_sub(z.zw, z_center.zw);
+
+            float diff_re_norm = dd_to_float(diff_re) * 1e6 + 0.5;
+            float diff_im_norm = dd_to_float(diff_im) * 1e6 + 0.5;
+
+            fragColor = vec4(
+                clamp(diff_re_norm, 0.0, 1.0),
+                clamp(diff_im_norm, 0.0, 1.0),
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 21: Show z LO parts after 5 iterations
+        // If these are zero, DD arithmetic is failing to preserve precision
+        if (u_debug_mode == 21) {
+            vec4 z = COMPLEX_DD_ZERO;
+            for (int i = 0; i < 5; i++) {
+                z = complex_dd_add(complex_dd_sqr(z), c_dd);
+            }
+            // Show the LO parts (z.y and z.w) - these should be non-zero
+            float lo_re_scaled = z.y * 1e6 + 0.5;
+            float lo_im_scaled = z.w * 1e6 + 0.5;
+            fragColor = vec4(
+                clamp(lo_re_scaled, 0.0, 1.0),
+                clamp(lo_im_scaled, 0.0, 1.0),
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 22: Show z difference from center after 5 iterations
+        if (u_debug_mode == 22) {
+            vec4 z = COMPLEX_DD_ZERO;
+            for (int i = 0; i < 5; i++) {
+                z = complex_dd_add(complex_dd_sqr(z), c_dd);
+            }
+
+            vec4 center = vec4(u_center_dd.xy, u_center_dd.zw);
+            vec4 z_center = COMPLEX_DD_ZERO;
+            for (int i = 0; i < 5; i++) {
+                z_center = complex_dd_add(complex_dd_sqr(z_center), center);
+            }
+
+            vec2 diff_re = dd_sub(z.xy, z_center.xy);
+            vec2 diff_im = dd_sub(z.zw, z_center.zw);
+            float diff_re_norm = dd_to_float(diff_re) * 1e6 + 0.5;
+            float diff_im_norm = dd_to_float(diff_im) * 1e6 + 0.5;
+
+            fragColor = vec4(
+                clamp(diff_re_norm, 0.0, 1.0),
+                clamp(diff_im_norm, 0.0, 1.0),
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 23: Show z difference from center after 10 iterations
+        if (u_debug_mode == 23) {
+            vec4 z = COMPLEX_DD_ZERO;
+            for (int i = 0; i < 10; i++) {
+                z = complex_dd_add(complex_dd_sqr(z), c_dd);
+            }
+
+            vec4 center = vec4(u_center_dd.xy, u_center_dd.zw);
+            vec4 z_center = COMPLEX_DD_ZERO;
+            for (int i = 0; i < 10; i++) {
+                z_center = complex_dd_add(complex_dd_sqr(z_center), center);
+            }
+
+            vec2 diff_re = dd_sub(z.xy, z_center.xy);
+            vec2 diff_im = dd_sub(z.zw, z_center.zw);
+            // Use larger scale factor since differences grow with iterations
+            float diff_re_norm = dd_to_float(diff_re) * 1e4 + 0.5;
+            float diff_im_norm = dd_to_float(diff_im) * 1e4 + 0.5;
+
+            fragColor = vec4(
+                clamp(diff_re_norm, 0.0, 1.0),
+                clamp(diff_im_norm, 0.0, 1.0),
+                0.5,
+                1.0
+            );
+            return;
+        }
+
+        // DEBUG MODE 8: Use STANDARD coordinate calculation but DD iteration
+        // This tests if the issue is in pixelToComplexDD or mandelbrotDD
+        if (u_debug_mode == 8) {
+            vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);
+            vec2 uv = (v_texCoord - 0.5) * aspectRatio;
+            vec2 c_standard = u_center + uv * u_scale;
+            // Convert to DD and run DD iteration
+            vec4 c_dd_from_standard = vec4(c_standard.x, 0.0, c_standard.y, 0.0);
+            mu = mandelbrotDD(c_dd_from_standard);
+        }
+        // DEBUG MODE 9: Use DD coordinates but STANDARD iteration
+        // This tests if DD math is broken
+        else if (u_debug_mode == 9) {
+            // Convert c_dd back to standard precision and use standard iteration
+            vec2 c_from_dd = vec2(dd_to_float(c_dd.xy), dd_to_float(c_dd.zw));
+            mu = mandelbrot(c_from_dd);
+        } else {
+            mu = mandelbrotDD(c_dd);
+        }
     } else {
         // Use standard precision for normal zoom levels with interpolated UV
         vec2 aspectRatio = vec2(u_resolution.x / u_resolution.y, 1.0);

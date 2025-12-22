@@ -200,6 +200,9 @@ install-hooks:
 	chmod +x .git/hooks/pre-commit
 	@echo "✅ Git hooks installed!"
 
+# Alias for dev
+run: dev
+
 # Start all services (future: when we have backend)
 start: dev
 
@@ -233,3 +236,65 @@ dev-webgpu:
 
 dev-cpu:
 	RENDERER=cpu npm run dev
+
+# ============================================================
+# DD Shader Debugging
+# ============================================================
+
+# Run E2E test specifically for DD shader deep zoom
+test-dd:
+	@echo "🔬 Testing DD shader at deep zoom..."
+	npm run test:e2e -- --project=chromium --grep "deep" --timeout=30000
+
+# Run DD shader debug test with specific debug mode
+# Usage: make test-dd-debug MODE=1  (1=coords, 2=DD coords, 3=scale, 4=iterations)
+test-dd-debug: MODE ?= 0
+test-dd-debug:
+	@echo "🐛 DD Shader Debug Test (mode=$(MODE))"
+	@echo "  0=normal, 1=pixel coords, 2=DD coords, 3=scale, 4=iteration growth"
+	npm run test:e2e -- --project=chromium --grep "DD mode" --timeout=30000
+
+# Quick typecheck to verify shader changes compile
+check-shaders:
+	@echo "🔍 Checking shader compilation..."
+	npm run typecheck
+	@echo "✅ TypeScript/shaders compile successfully"
+
+# Test deep zoom at specific scale
+# Usage: make test-zoom SCALE=1e-8
+test-zoom: SCALE ?= 1e-7
+test-zoom:
+	@echo "🔭 Testing zoom at scale $(SCALE)..."
+	npm run test:e2e -- --project=chromium --grep "zoom" --timeout=60000
+
+# Run just the visual regression tests
+test-visual:
+	@echo "📸 Running visual regression tests..."
+	npm run test:e2e -- --project=chromium --grep "visually" --timeout=30000
+
+# Headed E2E test for manual debugging (opens browser)
+e2e-headed:
+	@echo "🎭 Running E2E tests with visible browser..."
+	npm run test:e2e -- --headed --project=chromium --timeout=60000
+
+# Debug a specific E2E test with visible browser
+# Usage: make debug-test NAME="should detect debug colors"
+debug-test: NAME ?= "DD mode"
+debug-test:
+	@echo "🐛 Debugging test: $(NAME)"
+	npm run test:e2e -- --headed --project=chromium --grep $(NAME) --timeout=120000
+
+# Run DD shader debug tests (use --update-snapshots on first run)
+test-dd-shader:
+	@echo "🔬 Running DD shader debug tests..."
+	npm run test:e2e -- --project=chromium tests/e2e/dd-debug.spec.ts --timeout=60000
+
+# Run DD shader debug tests with visible browser
+test-dd-shader-headed:
+	@echo "🔬 Running DD shader debug tests (headed)..."
+	npm run test:e2e -- --headed --project=chromium tests/e2e/dd-debug.spec.ts --timeout=120000
+
+# Update DD shader debug test snapshots
+test-dd-shader-update:
+	@echo "📸 Updating DD shader debug test snapshots..."
+	npm run test:e2e -- --project=chromium tests/e2e/dd-debug.spec.ts --update-snapshots --timeout=60000

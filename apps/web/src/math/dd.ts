@@ -71,9 +71,28 @@ function twoProduct(a: number, b: number): DoubleDouble {
 
 /**
  * Create a double-double from a single double
+ * NOTE: This is for CPU-side DD arithmetic where both hi and lo are float64.
+ * For GLSL (where hi and lo are float32), use ddFromNumberForGLSL().
  */
 export function ddFromNumber(x: number): DoubleDouble {
   return { hi: x, lo: 0.0 };
+}
+
+/**
+ * Create a double-double from a float64 for use in GLSL shaders.
+ *
+ * CRITICAL: In GLSL, uniforms are float32. When we pass a DD as vec2/vec4,
+ * each component is truncated to float32. This function properly splits
+ * a float64 into two float32 values such that hi + lo ≈ original.
+ *
+ * This gives us ~48 bits of mantissa precision (vs 24 for float32 alone).
+ */
+export function ddFromNumberForGLSL(x: number): DoubleDouble {
+  // Math.fround() rounds to float32 precision
+  const hi = Math.fround(x);
+  // The difference captures what was lost in the rounding
+  const lo = Math.fround(x - hi);
+  return { hi, lo };
 }
 
 /**

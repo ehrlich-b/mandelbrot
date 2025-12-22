@@ -1,10 +1,19 @@
 import { ProgressiveMode } from './render/WebGLRenderer';
 import { WebGLRendererDD } from './render/WebGLRendererDD';
+import { getPerturbationRenderer, type PerturbationRenderer } from './render/PerturbationRenderer';
 import { TileRenderer } from './tiles';
 import { InputHandler } from './input/InputHandler';
 import { HUD } from './ui/HUD';
 import { Controls } from './ui/Controls';
 import { store, type ViewportState } from './state/store';
+import {
+  ddFromNumberForGLSL,
+  ddAdd,
+  ddSub,
+  ddMul,
+  ddDiv,
+  ddToNumber
+} from './math/dd';
 
 export type RenderMode = 'fullframe' | 'tiled';
 
@@ -14,9 +23,13 @@ export interface RenderStats {
   lastFrameTime: number;
 }
 
+// Threshold for switching to perturbation mode (DD is broken below this)
+const PERTURBATION_THRESHOLD = 5e-6;
+
 export class MandelbrotViewer {
   private canvas: HTMLCanvasElement;
   private renderer: WebGLRendererDD;
+  private perturbationRenderer: PerturbationRenderer;
   private tileRenderer: TileRenderer | null = null;
   private inputHandler: InputHandler;
   private hud: HUD;
@@ -53,16 +66,20 @@ export class MandelbrotViewer {
   // Histogram equalization state
   private histogramEqualizationEnabled = false;
 
+  // Debug mode for DD shader diagnostics
+  private ddDebugMode = 0;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.renderer = new WebGLRendererDD();
+    this.perturbationRenderer = getPerturbationRenderer();
     this.inputHandler = new InputHandler(canvas);
     this.hud = new HUD();
     this.controls = new Controls();
-    
+
     // Initialize viewport from store
     this.viewport = store.getViewport();
-    
+
     this.setupEventHandlers();
   }
 
@@ -75,6 +92,17 @@ export class MandelbrotViewer {
     await this.renderer.init(this.canvas);
     this.hud.init();
     this.controls.init();
+
+    // Initialize perturbation renderer for deep zoom
+    const gl = this.canvas.getContext('webgl2');
+    if (gl) {
+      const perturbAvailable = await this.perturbationRenderer.init(gl);
+      if (perturbAvailable) {
+        console.log('Perturbation renderer initialized - deep zoom enabled');
+      } else {
+        console.warn('Perturbation renderer failed to initialize - deep zoom may be limited');
+      }
+    }
 
     this.renderer.setRenderCallback((stats) => {
       this.stats.renderTime = stats.renderTime;
@@ -143,11 +171,22 @@ export class MandelbrotViewer {
 
   private setupEventHandlers(): void {
     this.inputHandler.onPan = (dx, dy) => {
-      const worldDx = (dx / this.canvas.width) * this.viewport.scale;
-      const worldDy = (dy / this.canvas.height) * this.viewport.scale;
+      // Use DD arithmetic to preserve precision at deep zoom
+      const centerXDD = ddFromNumberForGLSL(this.viewport.centerX);
+      const centerYDD = ddFromNumberForGLSL(this.viewport.centerY);
+      const scaleDD = ddFromNumberForGLSL(this.viewport.scale);
+      const widthDD = ddFromNumberForGLSL(this.canvas.width);
+      const heightDD = ddFromNumberForGLSL(this.canvas.height);
+
+      const worldDxDD = ddMul(ddDiv(ddFromNumberForGLSL(dx), widthDD), scaleDD);
+      const worldDyDD = ddMul(ddDiv(ddFromNumberForGLSL(dy), heightDD), scaleDD);
+
+      const newCenterXDD = ddSub(centerXDD, worldDxDD);
+      const newCenterYDD = ddAdd(centerYDD, worldDyDD);
+
       store.setViewport({
-        centerX: this.viewport.centerX - worldDx,
-        centerY: this.viewport.centerY + worldDy,
+        centerX: ddToNumber(newCenterXDD),
+        centerY: ddToNumber(newCenterYDD),
       });
     };
 
@@ -224,30 +263,53 @@ export class MandelbrotViewer {
 
   private zoom(factor: number, centerX?: number, centerY?: number): void {
     const newScale = this.viewport.scale / factor;
-    let newCenterX = this.viewport.centerX;
-    let newCenterY = this.viewport.centerY;
-    
+
+    // Use DD arithmetic for center calculation to preserve precision at deep zoom
+    // This prevents "rectangular block" artifacts when scale < 1e-8
+    let centerXDD = ddFromNumberForGLSL(this.viewport.centerX);
+    let centerYDD = ddFromNumberForGLSL(this.viewport.centerY);
+
     if (centerX !== undefined && centerY !== undefined) {
       const rect = this.canvas.getBoundingClientRect();
       const x = centerX - rect.left;
       const y = centerY - rect.top;
-      
+
       const dx = x - this.canvas.width / 2;
       const dy = y - this.canvas.height / 2;
-      const worldDx = (dx / this.canvas.width) * this.viewport.scale;
-      const worldDy = (dy / this.canvas.height) * this.viewport.scale;
-      
-      newCenterX += worldDx * (1 - 1 / factor);
-      newCenterY -= worldDy * (1 - 1 / factor);
+
+      // Calculate world delta using DD arithmetic
+      const scaleDD = ddFromNumberForGLSL(this.viewport.scale);
+      const widthDD = ddFromNumberForGLSL(this.canvas.width);
+      const heightDD = ddFromNumberForGLSL(this.canvas.height);
+      const factorDD = ddFromNumberForGLSL(factor);
+      const oneDD = ddFromNumberForGLSL(1.0);
+
+      // worldDx = (dx / width) * scale
+      const dxDD = ddFromNumberForGLSL(dx);
+      const dyDD = ddFromNumberForGLSL(dy);
+      const worldDxDD = ddMul(ddDiv(dxDD, widthDD), scaleDD);
+      const worldDyDD = ddMul(ddDiv(dyDD, heightDD), scaleDD);
+
+      // adjustment = (1 - 1/factor)
+      const invFactorDD = ddDiv(oneDD, factorDD);
+      const adjustmentDD = ddSub(oneDD, invFactorDD);
+
+      // newCenter += worldD * adjustment
+      centerXDD = ddAdd(centerXDD, ddMul(worldDxDD, adjustmentDD));
+      centerYDD = ddSub(centerYDD, ddMul(worldDyDD, adjustmentDD));
     }
-    
+
+    // Convert back to float64 for storage (DD preserves more precision in calculation)
+    const newCenterX = ddToNumber(centerXDD);
+    const newCenterY = ddToNumber(centerYDD);
+
     // Auto-adjust iterations based on zoom level
     const zoomLevel = Math.log2(2.5 / newScale);
     const newMaxIterations = Math.min(
       8192,
       Math.max(256, Math.floor(256 + zoomLevel * 50))
     );
-    
+
     store.setViewport({
       centerX: newCenterX,
       centerY: newCenterY,
@@ -342,7 +404,7 @@ export class MandelbrotViewer {
 
     const renderStart = performance.now();
 
-    let precisionMode: 'STANDARD' | 'DD' | 'TILED' = 'STANDARD';
+    let precisionMode: 'STANDARD' | 'DD' | 'PERTURB' | 'TILED' = 'STANDARD';
 
     if (this.renderMode === 'tiled' && this.tileRenderer) {
       // Tile-based rendering
@@ -358,13 +420,64 @@ export class MandelbrotViewer {
         colorScale: this.viewport.colorScale,
       });
       precisionMode = 'TILED';
+    } else if (this.viewport.scale < PERTURBATION_THRESHOLD && this.perturbationRenderer.isAvailable()) {
+      // Deep zoom - use perturbation theory (DD is broken due to float32 epsilon limitation)
+      const centerReal = this.viewport.centerX.toPrecision(17);
+      const centerImag = this.viewport.centerY.toPrecision(17);
+      const perturbViewport = {
+        centerReal,
+        centerImag,
+        scale: this.viewport.scale,
+        maxIterations: Math.max(64, effectiveIterations),
+      };
+
+      // Check if we have a VALID orbit for the current viewport
+      // The orbit is valid if it doesn't need recomputation
+      const existingOrbit = this.perturbationRenderer.getCurrentOrbit();
+      const orbitIsValid = existingOrbit && !this.perturbationRenderer.needsRecompute(
+        centerReal, centerImag, this.viewport.scale
+      );
+
+      if (orbitIsValid) {
+        // Orbit is valid for current viewport - render with perturbation
+        this.perturbationRenderer.render(
+          perturbViewport,
+          this.viewport.colorScheme,
+          {
+            histogramEqualization: this.histogramEqualizationEnabled,
+            glitchThreshold: 1e10,  // Completely disable glitch detection
+          }
+        );
+        precisionMode = 'PERTURB';
+      } else {
+        // Orbit is stale or missing - need to recompute
+        // Fall back to standard rendering while recomputing
+        // (At very deep zoom this may look broken, but at least it's not garbage from wrong orbit)
+        this.renderer.render({
+          centerX: this.viewport.centerX,
+          centerY: this.viewport.centerY,
+          scale: this.viewport.scale,
+          maxIterations: Math.max(64, effectiveIterations),
+          width: this.canvas.width,
+          height: this.canvas.height,
+          colorScheme: this.viewport.colorScheme,
+          colorOffset: this.viewport.colorOffset,
+          colorScale: this.viewport.colorScale,
+          antiAliasing: false,
+          histogramEqualization: this.histogramEqualizationEnabled,
+          useAutoPrecision: false, // Use standard only, DD is broken
+        });
+        precisionMode = 'STANDARD';
+
+        // Trigger orbit recomputation for next frame
+        this.perturbationRenderer.computeReferenceOrbit(perturbViewport)
+          .catch(err => console.error('Reference orbit computation failed:', err));
+      }
     } else {
-      // Full-frame rendering (original)
-      // Progressive rendering now works in both standard and DD modes
-      // (DD shader implements stochastic and interleaved modes, but not reprojection)
+      // Standard or DD rendering (for scale > PERTURBATION_THRESHOLD)
+      // Note: DD mode has limitations - see deep_zoom_issue.md
       const canUseProgressive = this.progressiveEnabled;
 
-      // Render with progressive mode in standard precision, full render in DD mode
       this.renderer.render({
         centerX: this.viewport.centerX,
         centerY: this.viewport.centerY,
@@ -379,9 +492,9 @@ export class MandelbrotViewer {
         aaQuality: this.aaQuality,
         histogramEqualization: this.histogramEqualizationEnabled,
         useAutoPrecision: true,
-        // Pass progressive mode info - renderer will use it for standard shader
         progressiveMode: canUseProgressive && !this.progressiveCompleted ? this.progressiveMode : ProgressiveMode.FULL,
         progressiveStage: this.progressiveStage,
+        debugMode: this.ddDebugMode,
       });
 
       // Advance progressive stage if in progressive mode
@@ -445,10 +558,32 @@ export class MandelbrotViewer {
       scale: ddParams.scale,
       maxIterations: iterations || Math.min(8192, Math.max(1000, Math.floor(2000 - Math.log10(ddParams.scale) * 100))),
     });
-    
+
     // Log precision info
     const precisionInfo = this.renderer.getPrecisionInfo();
     console.log(`Deep zoom activated: ${precisionInfo.currentPrecision} precision (${precisionInfo.effectiveDigits} digits)`);
+  }
+
+  /**
+   * Set DD shader debug mode for diagnostics
+   * @param mode 0=normal, 1=pixel coords, 2=DD coords, 3=scale, 4=iteration growth
+   */
+  setDebugMode(mode: number): void {
+    this.ddDebugMode = mode;
+    console.log(`DD Debug mode set to ${mode}:`, {
+      0: 'Normal rendering',
+      1: 'Pixel coordinate visualization',
+      2: 'DD coordinate hi-parts visualization',
+      3: 'Scale uniform visualization',
+      4: 'Iteration growth visualization',
+    }[mode] || 'Unknown');
+  }
+
+  /**
+   * Get current debug mode
+   */
+  getDebugMode(): number {
+    return this.ddDebugMode;
   }
 
   private toggleFullscreen(): void {

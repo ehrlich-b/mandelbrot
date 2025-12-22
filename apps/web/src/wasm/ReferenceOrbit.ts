@@ -22,8 +22,12 @@ interface BigFloatModule {
   lengthBytesUTF8: (str: string) => number;
   _malloc: (size: number) => number;
   _free: (ptr: number) => void;
-  HEAPF64: Float64Array;
-  HEAP32: Int32Array;
+  // Optional - may or may not be exported depending on build
+  HEAPF64?: Float64Array;
+  HEAP32?: Int32Array;
+  // Alternative memory access
+  asm?: { memory?: WebAssembly.Memory };
+  wasmMemory?: WebAssembly.Memory;
 }
 
 /**
@@ -57,6 +61,28 @@ export class ReferenceOrbit {
   private currentOrbit: ReferenceOrbitData | null = null;
 
   /**
+   * Get Float64 view of WASM memory
+   * Note: The module exports HEAPF64 directly after we patched bigfloat.js
+   */
+  private getHEAPF64(): Float64Array {
+    if (!this.module || !this.module.HEAPF64) {
+      throw new Error('WASM not initialized or HEAPF64 not available');
+    }
+    return this.module.HEAPF64;
+  }
+
+  /**
+   * Get Int32 view of WASM memory
+   * Note: The module exports HEAP32 directly after we patched bigfloat.js
+   */
+  private getHEAP32(): Int32Array {
+    if (!this.module || !this.module.HEAP32) {
+      throw new Error('WASM not initialized or HEAP32 not available');
+    }
+    return this.module.HEAP32;
+  }
+
+  /**
    * Initialize with WASM module
    */
   async init(): Promise<boolean> {
@@ -71,8 +97,19 @@ export class ReferenceOrbit {
     try {
       const createModule = await import('../wasm-out/bigfloat.js');
       this.module = await createModule.default();
+
+      // Verify memory access is available
+      console.log('HEAPF64 available:', !!this.module.HEAPF64);
+      console.log('HEAP32 available:', !!this.module.HEAP32);
+      console.log('wasmMemory available:', !!this.module.wasmMemory);
+
+      if (!this.module.HEAPF64 || !this.module.HEAP32) {
+        console.error('ReferenceOrbit: WASM memory access not available');
+        return false;
+      }
+
       this.initialized = true;
-      console.log('ReferenceOrbit WASM initialized');
+      console.log('ReferenceOrbit WASM initialized successfully');
       return true;
     } catch (error) {
       console.warn('ReferenceOrbit: Failed to initialize WASM:', error);
@@ -135,13 +172,15 @@ export class ReferenceOrbit {
       const orbitReal = new Float64Array(length + 1);
       const orbitImag = new Float64Array(length + 1);
 
+      const heapF64 = this.getHEAPF64();
       const heapOffsetRe = orbitRePtr / 8;
       const heapOffsetIm = orbitImPtr / 8;
-      orbitReal.set(mod.HEAPF64.subarray(heapOffsetRe, heapOffsetRe + length + 1));
-      orbitImag.set(mod.HEAPF64.subarray(heapOffsetIm, heapOffsetIm + length + 1));
+      orbitReal.set(heapF64.subarray(heapOffsetRe, heapOffsetRe + length + 1));
+      orbitImag.set(heapF64.subarray(heapOffsetIm, heapOffsetIm + length + 1));
 
       // Get escape iteration
-      const escapeIteration = mod.HEAP32[escapeIterPtr / 4];
+      const heap32 = this.getHEAP32();
+      const escapeIteration = heap32[escapeIterPtr / 4];
 
       const orbit: ReferenceOrbitData = {
         centerReal,
@@ -186,19 +225,56 @@ export class ReferenceOrbit {
   ): boolean {
     if (!this.currentOrbit) return true;
 
-    // Parse current and new centers
-    const curRe = parseFloat(this.currentOrbit.centerReal);
-    const curIm = parseFloat(this.currentOrbit.centerImag);
-    const newRe = parseFloat(newCenterReal);
-    const newIm = parseFloat(newCenterImag);
+    // At very deep zoom, float64 parsing loses precision.
+    // Compare strings directly for equality first.
+    if (this.currentOrbit.centerReal !== newCenterReal ||
+        this.currentOrbit.centerImag !== newCenterImag) {
+      // Centers are different strings - need to check if difference is significant
 
-    // If offset from reference is larger than viewport, recompute
-    const dx = Math.abs(newRe - curRe);
-    const dy = Math.abs(newIm - curIm);
-    const maxOffset = scale * 0.5; // Half the viewport
+      // Parse current and new centers (note: this loses precision at very deep zoom)
+      const curRe = parseFloat(this.currentOrbit.centerReal);
+      const curIm = parseFloat(this.currentOrbit.centerImag);
+      const newRe = parseFloat(newCenterReal);
+      const newIm = parseFloat(newCenterImag);
 
-    return dx > maxOffset || dy > maxOffset;
+      // If parse gives same value but strings differ, we're at precision limit
+      // In this case, check if the string representations differ significantly
+      if (curRe === newRe && curIm === newIm) {
+        // Float64 can't distinguish them, but strings are different
+        // This means we're at very deep zoom where precision matters
+        // Recompute to be safe
+        return true;
+      }
+
+      // If offset from reference is larger than 10% of viewport, recompute
+      const dx = Math.abs(newRe - curRe);
+      const dy = Math.abs(newIm - curIm);
+      const maxOffset = scale * 0.1; // 10% of viewport (more aggressive)
+
+      if (dx > maxOffset || dy > maxOffset) {
+        return true;
+      }
+    }
+
+    // Also recompute if scale changed significantly (more than 2x)
+    if (this.lastScale !== undefined) {
+      const scaleRatio = scale / this.lastScale;
+      if (scaleRatio < 0.5 || scaleRatio > 2.0) {
+        this.lastScale = scale; // Update for next comparison
+        return true;
+      }
+    } else {
+      // First call - store scale and recompute
+      this.lastScale = scale;
+      return true;
+    }
+
+    // Don't need to recompute - update lastScale for tracking
+    this.lastScale = scale;
+    return false;
   }
+
+  private lastScale?: number;
 
   /**
    * Create a WebGL texture from the reference orbit

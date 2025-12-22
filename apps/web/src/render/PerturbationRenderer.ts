@@ -135,6 +135,7 @@ export class PerturbationRenderer {
       'u_referenceEscapeIter',
       'u_referencePoint',
       'u_pixelDelta',
+      'u_viewOffset',
       'u_glitchThreshold',
       'u_progressiveMode',
       'u_progressiveStage',
@@ -303,21 +304,32 @@ export class PerturbationRenderer {
     // Use program
     gl.useProgram(this.program);
 
-    // Set uniforms
+    // Define uniform types explicitly (shader declares these types)
+    const intUniforms = new Set([
+      'u_maxIterations', 'u_colorScheme', 'u_orbitTextureWidth', 'u_orbitTextureHeight',
+      'u_orbitLength', 'u_referenceEscapeIter', 'u_progressiveMode', 'u_progressiveStage'
+    ]);
+    const floatUniforms = new Set([
+      'u_colorOffset', 'u_colorScale', 'u_glitchThreshold'
+    ]);
+    const boolUniforms = new Set(['u_histogramEqualization']);
+
+    // Set uniforms with explicit type handling
     const setUniform = (name: string, value: number | number[] | boolean) => {
       const loc = this.uniformLocations.get(name);
       if (!loc) return;
 
-      if (typeof value === 'boolean') {
+      if (boolUniforms.has(name)) {
         gl.uniform1i(loc, value ? 1 : 0);
+      } else if (intUniforms.has(name)) {
+        gl.uniform1i(loc, Math.floor(value as number));
+      } else if (floatUniforms.has(name)) {
+        gl.uniform1f(loc, value as number);
+      } else if (Array.isArray(value) && value.length === 2) {
+        gl.uniform2fv(loc, new Float32Array(value));
       } else if (typeof value === 'number') {
-        if (Number.isInteger(value)) {
-          gl.uniform1i(loc, value);
-        } else {
-          gl.uniform1f(loc, value);
-        }
-      } else if (value.length === 2) {
-        gl.uniform2fv(loc, value);
+        // Default to float for unknown uniforms
+        gl.uniform1f(loc, value);
       }
     };
 
@@ -327,8 +339,8 @@ export class PerturbationRenderer {
 
     // Color uniforms
     setUniform('u_colorScheme', colorScheme);
-    setUniform('u_colorOffset', 0);
-    setUniform('u_colorScale', 1);
+    setUniform('u_colorOffset', 0.0);  // Must be float, not int
+    setUniform('u_colorScale', 1.0);   // Must be float, not int
 
     // Orbit texture uniforms
     setUniform('u_orbitTextureWidth', this.orbitTextureWidth);
@@ -347,6 +359,17 @@ export class PerturbationRenderer {
     const pixelDeltaX = viewport.scale / gl.canvas.width;
     const pixelDeltaY = viewport.scale / gl.canvas.height;
     setUniform('u_pixelDelta', [pixelDeltaX, pixelDeltaY]);
+
+    // View offset: difference between current viewport center and reference orbit center
+    // This is CRITICAL for correct rendering during interactive zooming/panning.
+    // Without this, the fractal appears "stuck to the glass" until orbit recomputes.
+    //
+    // Note: Using float64 subtraction here. At very deep zoom (>1e-12), this may
+    // lose precision, but needsRecompute() forces orbit recomputation at 10% viewport
+    // offset, so the offset stays small relative to the precision limits.
+    const viewOffsetX = parseFloat(viewport.centerReal) - parseFloat(this.currentOrbit.centerReal);
+    const viewOffsetY = parseFloat(viewport.centerImag) - parseFloat(this.currentOrbit.centerImag);
+    setUniform('u_viewOffset', [viewOffsetX, viewOffsetY]);
 
     // Glitch threshold
     setUniform('u_glitchThreshold', options.glitchThreshold ?? 1e-3);
@@ -390,6 +413,13 @@ export class PerturbationRenderer {
    */
   getCurrentOrbit(): ReferenceOrbitData | null {
     return this.currentOrbit;
+  }
+
+  /**
+   * Check if orbit needs recomputation for given viewport
+   */
+  needsRecompute(centerReal: string, centerImag: string, scale: number): boolean {
+    return getReferenceOrbit().needsRecompute(centerReal, centerImag, scale);
   }
 
   /**

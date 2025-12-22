@@ -4,25 +4,41 @@
 
 ---
 
-## Current Status
+## ✅ December 2024 Audit - RESOLVED
 
-**Working Now:**
-- WebGL2 renderer with 60+ FPS at standard zoom
-- GPU double-double (DD) precision to ~1e-10
-- 11 color palettes, anti-aliasing, histogram equalization
-- Touch/mouse/keyboard input with inertia
-- State persistence, bookmarks, fullscreen mode
-- Comprehensive DD arithmetic tests
+**See [AUDIT-2024-12.md](./AUDIT-2024-12.md) for full analysis.**
 
-**Critical Blockers:**
-- Progressive rendering DISABLED (causing visual artifacts)
-- No tile caching (every frame recalculates from scratch)
-- No Web Workers (everything on main thread)
-- No CLI tool (can't render posters offline)
+### Status Update (Dec 21, 2024)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Standard Rendering | ✅ Working | 60+ FPS at scale > 5e-6 |
+| WASM Arbitrary Precision | ✅ Working | Used by perturbation for reference orbit |
+| Perturbation Theory | ⚠️ **PARTIAL** | Tests pass, interactive zooming broken |
+| Tile-based Rendering | ⏸️ Deferred | Infrastructure exists, not integrated |
+| Web Workers | ⏸️ Deferred | Infrastructure exists, not integrated |
+
+### Current Blocker: Perturbation Interactive Zooming
+
+**See [deep_zoom_issue.md](./deep_zoom_issue.md) for full investigation and code.**
+
+Perturbation rendering works in automated tests (which wait 2s between zoom levels) but produces hopping, discontinuity, and garbage during interactive mouse wheel zooming. Suspected race condition or stale orbit usage.
 
 ---
 
-## 🔥 Priority 0: Unblock Everything
+## Actual Working Features
+
+- WebGL2 renderer with 60+ FPS at standard zoom (scale > 5e-6)
+- Perturbation theory for deep zoom (works in tests, interactive broken)
+- 11 color palettes, anti-aliasing, histogram equalization
+- Touch/mouse/keyboard input with inertia
+- State persistence, bookmarks, fullscreen mode
+- Precision mode detection and automatic switching
+- Debug modes (1-7) for shader diagnostics
+
+---
+
+## ✅ Priority 0: Infrastructure - COMPLETE
 
 ### P0-1: Fix Progressive Rendering ✅
 Progressive rendering is implemented but disabled due to "chaos issues" during DD development.
@@ -191,16 +207,16 @@ When GPU DD isn't enough (~1e-12), fall back to CPU with arbitrary precision.
 - [x] Automatic precision mode selection based on scale
 
 **Precision thresholds:**
-- Scale > 5e-6: standard (GPU float32/64)
-- Scale 5e-6 → 1e-12: dd (GPU double-double)
-- Scale < 1e-12: arbitrary (WASM bigfloat)
+- Scale > 5e-6: Standard GPU (float32) ✅
+- Scale < 5e-6: Perturbation (WASM reference + GPU delta) ⚠️ (interactive broken)
+- Scale < 1e-14: CPU Arbitrary precision (untested)
 
 **Files modified:**
 - `apps/web/src/workers/tile.worker.ts` - Added WASM integration, arbitrary precision mode
 - `apps/web/src/workers/types.ts` - Added TilePrecisionMode, precisionLimbs params
 - `apps/web/src/tiles/TileManager.ts` - Auto precision selection, limb calculation
 
-### P2-3: Perturbation Theory (The Real Infinite Zoom) ✅
+### P2-3: Perturbation Theory (The Real Infinite Zoom) ⚠️ PARTIAL
 This is how Kalles Fraktaler zooms to 10^1000. The key insight: most pixels follow similar orbits.
 
 **Theory:**
@@ -219,7 +235,9 @@ Where:
 - [x] Delta orbit shader (GPU, float64, uses reference as texture lookup)
 - [x] Glitch detection: when `|δ| > |Z| * threshold`, marks pixel for rebasing
 - [x] Rebasing: glitched pixels shown in magenta (CPU fallback ready)
+- [x] **INTEGRATED INTO VIEWER** - auto-activates at scale < 5e-6
 - [ ] Series approximation: skip first N iterations using Taylor series (10-100x speedup) - deferred
+- [ ] **FIX INTERACTIVE ZOOMING** - see issues below
 
 **Files created:**
 - `apps/web/src/wasm/ReferenceOrbit.ts` - Reference orbit computation and management
@@ -233,16 +251,30 @@ Where:
 4. Glitch detection marks pixels where |δ| > threshold * |Z|
 5. Glitched pixels fall back to CPU arbitrary precision
 
+**Current Status:**
+- ✅ Automated tests pass (zoom sequence 1e-5 to 1e-12 with 2s wait between levels)
+- ❌ Interactive zooming BROKEN - hopping, discontinuity, psychedelic garbage
+- See [deep_zoom_issue.md](./deep_zoom_issue.md) for full investigation
+
+**Known Issues (Interactive Use):**
+1. **No continuity** - Fractal shapes don't match between zoom levels
+2. **Regular hopping** - Image jumps as you scroll through zoom
+3. **Psychedelic blobs** - Random clipping instead of Mandelbrot structure
+
+**Suspected Root Causes:**
+1. Orbit recomputation can't keep up with continuous zooming
+2. Stale orbit used for rendering before new orbit ready
+3. Viewport coordinate drift during mouse zoom (float64 precision)
+
 **Acceptance:** Render 1e-50 zoom at interactive framerates (>30fps) on desktop GPU
 
-### P2-4: Precision Manager Overhaul ✅
-Automatic, seamless switching between precision modes.
+### P2-4: Precision Manager Overhaul ✅ WORKING
+Automatic switching between standard and perturbation modes.
 
 ```
-Scale > 5e-6:      GPU Standard (float32)      - fastest (~60 FPS)
-Scale 5e-6 → 1e-10: GPU Double-Double          - fast (~45 FPS)
-Scale 1e-10 → 1e-14: GPU Perturbation (float64) - medium (~30 FPS)
-Scale < 1e-14:     CPU Arbitrary Precision     - slow (~5 FPS) but unlimited
+Scale > 5e-6:   GPU Standard (float32)       - ✅ Works (~60 FPS)
+Scale < 5e-6:   GPU Perturbation (float64)   - ⚠️ Tests pass, interactive broken
+Scale < 1e-14:  CPU Arbitrary Precision      - ⚠️ Available but not auto-triggered
 ```
 
 - [x] Unified precision selection logic with configurable thresholds
@@ -513,13 +545,13 @@ WebGPU offers compute shaders - better parallelization than fragment shaders.
 - [x] Mobile-responsive layout
 - [x] Touch-optimized buttons (44px minimum)
 
-### Deep Zoom DD ✅
-- [x] Double-double arithmetic in TypeScript and GLSL
-- [x] Precision switching at 5e-6 threshold
-- [x] gl_FragCoord coordinate generation (avoids interpolation loss)
-- [x] DD division, multiplication, addition, subtraction
-- [x] Working to 1e-10 scale and beyond
-- [x] HUD shows precision mode
+### Deep Zoom (Perturbation)
+- [x] Reference orbit computation via WASM arbitrary precision
+- [x] Orbit upload to GPU texture
+- [x] Perturbation shader: δ' = 2·Z·δ + δ² + δc
+- [x] Integration with MandelbrotViewer (auto-activates at scale < 5e-6)
+- [x] Automated tests pass (zoom 1e-5 to 1e-12)
+- [ ] **Interactive zooming broken** - see [deep_zoom_issue.md](./deep_zoom_issue.md)
 
 ### Testing ✅
 - [x] Vitest unit tests for DD arithmetic
@@ -549,19 +581,15 @@ WebGPU offers compute shaders - better parallelization than fragment shaders.
 
 ### Test Infrastructure Issues
 
-The following E2E tests fail due to WebGL canvas pixel reading issues:
+**Root cause (RESOLVED):** Tests using `gl.readPixels()` on a WebGL canvas with `preserveDrawingBuffer: false` return empty/zero data after the frame is presented.
 
-**Root cause:** Tests use `canvas.getContext('2d').getImageData()` on a WebGL canvas with `preserveDrawingBuffer: false`. This returns empty/zero data.
+**Solution implemented:** Use Playwright screenshots for visual verification instead of `gl.readPixels()`. Screenshots capture the correct rendered output.
 
-**Failing tests:**
-- `should detect debug colors in DD mode` - Solid color detection gets all black pixels
-- `should render Mandelbrot set visually` - Same pixel reading issue
-- `should render correctly at various deep zoom levels` - Same issue
-
-**Fix options:**
-1. Use `gl.readPixels()` instead of 2D context for WebGL canvases
-2. Set `preserveDrawingBuffer: true` for test runs (performance impact)
-3. Use screenshot comparison instead of pixel sampling
+**Working DD test files:**
+- `tests/e2e/dd-debug.spec.ts` - Debug mode verification using screenshots
+- `tests/e2e/dd-render-test.spec.ts` - DD rendering tests using screenshots
+- `tests/e2e/dd-boundary-test.spec.ts` - Boundary location tests
+- `tests/e2e/dd-deep-zoom.spec.ts` - Deep zoom verification (1e-8 to 1e-10)
 
 **Other test timeouts** (environment-related, not code bugs):
 - `should respond to zoom controls` - Button click timeout
